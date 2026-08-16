@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#161616" />
+  <title>Op-Shop-Hop</title>
+  <meta name="description" content="A mobile-first Victorian op-shop field guide, rating notebook and hop planner." />
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQ3ynsMZJZQXJ/VcP7Dnd0vSxQVgWJM=" crossorigin="" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-wrap">
+      <a class="brand" href="#top" aria-label="Op-Shop-Hop home">
+        <span class="brand-mark">OSH</span>
+        <span><strong>Op‑Shop‑Hop</strong><small>Victoria thrift field notes</small></span>
+      </a>
+      <div class="profile-tools">
+        <label for="profileSelect">Hopper</label>
+        <select id="profileSelect" aria-label="Active profile"></select>
+        <button class="icon-btn" id="newProfileBtn" type="button" title="New profile">＋</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">FIELD GUIDE · NOTEBOOK · ROUTE PLANNER</p>
+        <h1>Rate the racks. Remember the weird little one. Build the next hop.</h1>
+        <p class="lede">Ten-point tap ratings, personal notes and tags, Victorian shop discovery, and suburb-sized walking missions.</p>
+      </div>
+      <div class="hero-actions">
+        <button id="syncBtn" class="primary" type="button">↻ Refresh Victoria</button>
+        <button id="categoriesBtn" type="button">Tune review form</button>
+        <button id="dataBtn" type="button">Profiles & backup</button>
+      </div>
+      <p class="data-status" id="dataStatus">Loading the local field guide…</p>
+    </section>
+
+    <section class="filters-shell" aria-label="Shop filters">
+      <div class="coverage-tabs" role="group" aria-label="Coverage">
+        <button data-coverage="inner" class="active" type="button">Inner Melbourne</button>
+        <button data-coverage="metro" type="button">All Melbourne</button>
+        <button data-coverage="vic" type="button">All Victoria</button>
+      </div>
+      <div class="filters-grid">
+        <label class="search-label">Search
+          <input id="searchInput" type="search" placeholder="shop, suburb, charity, #tag…" autocomplete="off" />
+        </label>
+        <label>Suburb
+          <select id="suburbSelect"><option value="">All suburbs</option></select>
+        </label>
+        <label>Region
+          <select id="regionSelect"><option value="">All regions</option></select>
+        </label>
+        <label>Sort
+          <select id="sortSelect">
+            <option value="rating">My rating</option>
+            <option value="suburb">Suburb A–Z</option>
+            <option value="name">Shop A–Z</option>
+            <option value="distance">Distance from me</option>
+            <option value="recent">Recently reviewed</option>
+          </select>
+        </label>
+      </div>
+      <div class="filter-actions">
+        <button id="locateBtn" type="button">◎ Use my location</button>
+        <button id="hopSuburbBtn" type="button" disabled>＋ Hop this suburb</button>
+        <button id="addShopBtn" type="button">＋ Add missing shop</button>
+      </div>
+    </section>
+
+    <section class="map-shell" aria-label="Map">
+      <div id="map"></div>
+      <div class="map-note">© OpenStreetMap contributors · pins are the shops currently in view/filter</div>
+    </section>
+
+    <section class="route-tray" id="routeTray" aria-live="polite">
+      <div><strong id="routeCount">0</strong> stops in this hop <span id="routeSummary"></span></div>
+      <div>
+        <button id="clearRouteBtn" type="button">Clear</button>
+        <button id="planRouteBtn" type="button" class="primary" disabled>Plan hop</button>
+      </div>
+    </section>
+
+    <section class="results-heading">
+      <div><p class="eyebrow">SHOPS</p><h2 id="resultsTitle">Inner Melbourne</h2></div>
+      <div id="resultsCount" class="count-pill">0</div>
+    </section>
+    <section id="shopGrid" class="shop-grid" aria-live="polite"></section>
+  </main>
+
+  <dialog id="modal" class="modal">
+    <form method="dialog" class="modal-shell" id="modalShell">
+      <div class="modal-head">
+        <div id="modalTitle"></div>
+        <button value="cancel" class="icon-btn close" aria-label="Close">×</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+    </form>
+  </dialog>
+
+  <template id="shopCardTemplate">
+    <article class="shop-card">
+      <div class="shop-card-top">
+        <div>
+          <div class="shop-meta"></div>
+          <h3 class="shop-name"></h3>
+          <p class="shop-address"></p>
+        </div>
+        <button class="fav-btn" type="button" aria-label="Favourite">♡</button>
+      </div>
+      <div class="rating-line"></div>
+      <div class="tag-row"></div>
+      <div class="card-actions">
+        <button class="review-btn primary" type="button">Rate / note</button>
+        <button class="hop-btn" type="button">＋ Hop</button>
+        <button class="maps-btn" type="button">Directions</button>
+        <button class="nearby-btn" type="button">Around here</button>
+      </div>
+    </article>
+  </template>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="seed-stores.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
