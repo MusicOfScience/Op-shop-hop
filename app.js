@@ -38,6 +38,7 @@
   let markers = null;
   let routeLayer = null;
   let parkingMarker = null;
+  let locationMarker = null;
   let routeIds = new Set();
 
   const $ = (id) => document.getElementById(id);
@@ -83,6 +84,8 @@
     ["searchInput","suburbSelect","regionSelect","sortSelect"].forEach(id=>$(id).addEventListener(id==="searchInput"?"input":"change",render));
     $("suburbSelect").addEventListener("change",()=>{$("hopSuburbBtn").disabled=!$("suburbSelect").value;});
     $("locateBtn").addEventListener("click", locateUser);
+    $("locationSearchBtn").addEventListener("click", geocodeLocationSearch);
+    $("locationSearch").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();geocodeLocationSearch();}});
     $("syncBtn").addEventListener("click",()=>refreshOSM(true));
     $("categoriesBtn").addEventListener("click",openCategorySettings);
     $("dataBtn").addEventListener("click",openDataSettings);
@@ -269,16 +272,17 @@
 
   function openReview(shop){
     const p=profile();const existing=p.reviews[shop.id]||{ratings:{},categoryNames:{},notes:"",tags:[],visitedAt:"",updatedAt:""};
-    const review=structuredCloneSafe(existing);const categories=p.categories.filter(c=>c.mode==="always");
+    const review=structuredCloneSafe(existing);review.categoryNames=review.categoryNames||{};const categories=p.categories.filter(c=>c.mode==="always");
     const ratedIds=new Set(Object.keys(review.ratings||{}));
     p.categories.filter(c=>c.mode==="adhoc"&&ratedIds.has(c.id)).forEach(c=>{if(!categories.some(x=>x.id===c.id))categories.push(c);});
+    ratedIds.forEach(id=>{if(!categories.some(c=>c.id===id)&&!p.categories.some(c=>c.id===id)&&review.categoryNames[id]) categories.push({id,name:review.categoryNames[id],mode:"oneoff"});});
     setModalTitle(`<p class="eyebrow">REVIEW</p><h2>${esc(shop.name)}</h2><div class="muted">${esc(shop.address||shop.suburb||"")}</div>`);
     const body=document.createElement("div");
     body.innerHTML=`<div id="reviewCategories"></div>
       <div class="modal-section"><div class="inline-row"><select id="adhocCategory"><option value="">Add an ad hoc category…</option>${p.categories.filter(c=>c.mode==="adhoc"&&!categories.some(x=>x.id===c.id)).map(c=>`<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select><button type="button" id="addOtherReview">＋ One-off Other</button></div></div>
       <div class="modal-section"><label class="field-label">Notes<textarea id="reviewNotes" placeholder="The good rack is at the back; weird ceramics; pricing suddenly ambitious…">${esc(review.notes||"")}</textarea></label></div>
       <div class="modal-section"><label class="field-label">Hashtags<input id="reviewTags" value="${esc((review.tags||[]).map(t=>`#${t}`).join(" "))}" placeholder="#cheap #vinyl #chaos #designer"></label><div id="tagPreview" class="tag-row" style="margin-top:.5rem"></div><div class="muted" style="margin-top:.7rem">Your tag library</div><div id="tagLibrary" class="tag-row" style="margin-top:.35rem"></div></div>
-      <div class="modal-section form-grid"><label>Visited<input id="visitedAt" type="date" value="${esc(review.visitedAt||todayLocal())}"></label><label>Shop status<select id="shopStatus"><option value="visited">Visited</option><option value="want">Want to go</option><option value="skip">Skip for now</option></select></label></div>
+      <div class="modal-section form-grid"><label>Visited<input id="visitedAt" type="date" value="${esc(review.visitedAt||todayLocal())}"></label><label>Shop status<select id="shopStatus"><option value="visited" ${review.status!=="want"&&review.status!=="skip"?"selected":""}>Visited</option><option value="want" ${review.status==="want"?"selected":""}>Want to go</option><option value="skip" ${review.status==="skip"?"selected":""}>Skip for now</option></select></label></div>
       <div class="modal-actions"><button type="button" id="deleteReview" class="danger">Delete review</button><button type="button" id="saveReview" class="primary">Save review</button></div>`;
     $("modalBody").replaceChildren(body);const rc=body.querySelector("#reviewCategories");
     const renderCategories=()=>{rc.innerHTML="";categories.forEach(c=>rc.appendChild(reviewCategoryEl(c,review)));};renderCategories();
@@ -288,7 +292,7 @@
     });
     const tagsInput=body.querySelector("#reviewTags");const preview=body.querySelector("#tagPreview");const library=body.querySelector("#tagLibrary");const showTags=()=>preview.innerHTML=parseTags(tagsInput.value).map(tagChip).join("");tagsInput.addEventListener("input",showTags);showTags();const knownTags=[...new Set(Object.values(p.reviews||{}).flatMap(r=>r.tags||[]))].sort();library.innerHTML=knownTags.length?knownTags.map(t=>`<button type="button" class="tag-chip" data-tag="${esc(t)}"><span class="tag-icon">${tagIcon(t)}</span>#${esc(t)}</button>`).join(""):`<span class="muted">Tags you use will collect here.</span>`;library.querySelectorAll("[data-tag]").forEach(btn=>btn.addEventListener("click",()=>{const tags=parseTags(tagsInput.value);if(!tags.includes(btn.dataset.tag)) tags.push(btn.dataset.tag);tagsInput.value=tags.map(t=>`#${t}`).join(" ");showTags();}));
     body.querySelector("#saveReview").addEventListener("click",()=>{
-      review.notes=body.querySelector("#reviewNotes").value.trim();review.tags=parseTags(tagsInput.value);review.visitedAt=body.querySelector("#visitedAt").value;review.updatedAt=new Date().toISOString();review.categoryNames=review.categoryNames||{};categories.forEach(c=>review.categoryNames[c.id]=c.name);p.reviews[shop.id]=review;saveState();$("modal").close();render();
+      review.notes=body.querySelector("#reviewNotes").value.trim();review.tags=parseTags(tagsInput.value);review.visitedAt=body.querySelector("#visitedAt").value;review.status=body.querySelector("#shopStatus").value;review.updatedAt=new Date().toISOString();review.categoryNames=review.categoryNames||{};categories.forEach(c=>review.categoryNames[c.id]=c.name);p.reviews[shop.id]=review;saveState();$("modal").close();render();
     });
     body.querySelector("#deleteReview").addEventListener("click",()=>{if(confirm("Delete this review from this profile?")){delete p.reviews[shop.id];saveState();$("modal").close();render();}});
     $("modal").showModal();
@@ -366,9 +370,38 @@
     const body=$("modalBody");body.querySelector("#exportBtn").addEventListener("click",()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`op-shop-hop-backup-${todayLocal()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});body.querySelector("#importBtn").addEventListener("click",()=>body.querySelector("#importFile").click());body.querySelector("#importFile").addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;try{const incoming=JSON.parse(await f.text());if(!incoming.profiles||!incoming.activeProfileId)throw new Error();localStorage.setItem(STORAGE_KEY,JSON.stringify(incoming));location.reload();}catch(err){alert("That file is not an Op-Shop-Hop backup.");}});$("modal").showModal();
   }
 
+  function setOrigin(lat,lon,label){
+    userLocation={lat,lon,label};
+    if(locationMarker) map.removeLayer(locationMarker);
+    locationMarker=L.circleMarker([lat,lon],{radius:8,weight:3,fillOpacity:.85}).addTo(map).bindPopup(`<strong>${esc(label||"Starting point")}</strong>`);
+    map.setView([lat,lon],14,{animate:false});
+    $("locationHint").textContent=label?`Starting near ${label}`:"Starting from your location";
+    $("sortSelect").value="distance";
+    render();
+    map.setView([lat,lon],14,{animate:false});
+  }
+
   function locateUser(){
     if(!navigator.geolocation){alert("Location is not available in this browser.");return;}
-    $("locateBtn").textContent="Locating…";navigator.geolocation.getCurrentPosition(pos=>{userLocation={lat:pos.coords.latitude,lon:pos.coords.longitude};$("locateBtn").textContent="✓ Location on";map.setView([userLocation.lat,userLocation.lon],13);if($("sortSelect").value==="distance")render();},()=>{$("locateBtn").textContent="◎ Use my location";alert("Location permission was not available.");},{enableHighAccuracy:false,timeout:10000,maximumAge:300000});
+    $("locateBtn").textContent="Locating…";
+    navigator.geolocation.getCurrentPosition(pos=>{
+      $("locateBtn").textContent="✓ Using my location";
+      setOrigin(pos.coords.latitude,pos.coords.longitude,"your location");
+    },()=>{$("locateBtn").textContent="◎ Use my location";alert("Location permission was not available. You can type a suburb, street or postcode instead.");},{enableHighAccuracy:false,timeout:10000,maximumAge:300000});
+  }
+
+  async function geocodeLocationSearch(){
+    const input=$("locationSearch");const q=input.value.trim();if(!q)return;
+    const btn=$("locationSearchBtn");btn.disabled=true;btn.textContent="Finding…";$("locationHint").textContent="Looking for that place…";
+    try{
+      const query=/victoria|\bvic\b|australia/i.test(q)?q:`${q}, Victoria, Australia`;
+      const url=`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=au&limit=5&addressdetails=1&q=${encodeURIComponent(query)}`;
+      const res=await fetch(url,{headers:{"Accept":"application/json"}});if(!res.ok)throw new Error(`Geocoder ${res.status}`);
+      const rows=await res.json();const hit=rows.find(r=>/Victoria/i.test(r.display_name||""))||rows[0];
+      if(!hit){$("locationHint").textContent="Couldn’t find that place. Try a suburb plus postcode.";return;}
+      const label=(hit.display_name||q).split(",").slice(0,3).join(",");setOrigin(Number(hit.lat),Number(hit.lon),label);
+    }catch(e){$("locationHint").textContent="Address lookup failed just now. You can still pan the map or use your location.";}
+    finally{btn.disabled=false;btn.textContent="Find";}
   }
 
   function regionFor(s){
