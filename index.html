@@ -26,18 +26,40 @@
   </header>
 
   <main id="top">
-    <section class="hero">
+    <section class="hero compact-hero">
       <div>
-        <p class="eyebrow">FIELD GUIDE · NOTEBOOK · ROUTE PLANNER</p>
-        <h1>Rate the racks. Remember the weird little one. Build the next hop.</h1>
-        <p class="lede">Ten-point tap ratings, personal notes and tags, Victorian shop discovery, and suburb-sized walking missions.</p>
+        <p class="eyebrow">VICTORIA · FIELD GUIDE · NOTEBOOK</p>
+        <h1>Op‑shop‑hop.</h1>
+        <p class="lede">Find the shops around you, rate the good bits, remember where to go back.</p>
       </div>
       <div class="hero-actions">
-        <button id="syncBtn" class="primary" type="button">↻ Refresh Victoria</button>
         <button id="categoriesBtn" type="button">Tune review form</button>
         <button id="dataBtn" type="button">Profiles & backup</button>
       </div>
       <p class="data-status" id="dataStatus">Loading the local field guide…</p>
+    </section>
+
+    <section class="locator-shell" aria-label="Choose a starting location">
+      <div class="locator-copy">
+        <p class="eyebrow">START HERE</p>
+        <h2>Where are we op‑shopping?</h2>
+      </div>
+      <div class="locator-controls">
+        <button id="locateBtn" class="primary" type="button">◎ Use my location</button>
+        <div class="address-search">
+          <input id="locationSearch" type="search" placeholder="Suburb, street or postcode" autocomplete="street-address" aria-label="Suburb, street or postcode" />
+          <button id="locationSearchBtn" type="button">Find</button>
+        </div>
+      </div>
+      <div class="locator-meta">
+        <span id="locationHint">Or explore the map anywhere in Victoria.</span>
+        <button id="syncBtn" class="quiet-btn" type="button">↻ Refresh shop data</button>
+      </div>
+    </section>
+
+    <section class="map-shell map-first" aria-label="Op shop map">
+      <div id="map"></div>
+      <div class="map-note">© OpenStreetMap contributors · tap a pin to rate or note</div>
     </section>
 
     <section class="filters-shell" aria-label="Shop filters">
@@ -67,15 +89,9 @@
         </label>
       </div>
       <div class="filter-actions">
-        <button id="locateBtn" type="button">◎ Use my location</button>
         <button id="hopSuburbBtn" type="button" disabled>＋ Hop this suburb</button>
         <button id="addShopBtn" type="button">＋ Add missing shop</button>
       </div>
-    </section>
-
-    <section class="map-shell" aria-label="Map">
-      <div id="map"></div>
-      <div class="map-note">© OpenStreetMap contributors · pins are the shops currently in view/filter</div>
     </section>
 
     <section class="route-tray" id="routeTray" aria-live="polite">
