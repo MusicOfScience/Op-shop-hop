@@ -63,7 +63,6 @@
     loadCachedOSM();
     refreshFilters();
     render();
-    if(profile().name === "Guest") openProfileSetup(true);
     refreshOSM(false);
   }
 
@@ -376,6 +375,9 @@
     locationMarker=L.circleMarker([lat,lon],{radius:8,weight:3,fillOpacity:.85}).addTo(map).bindPopup(`<strong>${esc(label||"Starting point")}</strong>`);
     map.setView([lat,lon],14,{animate:false});
     $("locationHint").textContent=label?`Starting near ${label}`:"Starting from your location";
+    const cbdDistance=haversine(lat,lon,-37.8136,144.9631);
+    activeCoverage=cbdDistance<=15?"inner":cbdDistance<=60?"metro":"vic";
+    document.querySelectorAll("[data-coverage]").forEach(btn=>btn.classList.toggle("active",btn.dataset.coverage===activeCoverage));
     $("sortSelect").value="distance";
     render();
     map.setView([lat,lon],14,{animate:false});
