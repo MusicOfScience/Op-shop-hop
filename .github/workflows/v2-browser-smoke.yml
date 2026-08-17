@@ -23,7 +23,7 @@ jobs:
       - name: Run browser smoke test
         run: |
           python3 -m http.server 4173 >/tmp/osh-server.log 2>&1 &
-          cat > /tmp/smoke.mjs <<'JS'
+          cat > smoke.mjs <<'JS'
           import { chromium } from 'playwright';
           const browser = await chromium.launch({headless:true});
           const page = await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
@@ -48,7 +48,7 @@ jobs:
           console.log({cards,mapBox,canvasBox,mapped});
           await browser.close();
           JS
-          node /tmp/smoke.mjs
+          node smoke.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: v2-mobile-smoke
