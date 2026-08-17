@@ -1,182 +1,164 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#161616" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f4f0e8">
   <title>Op-Shop-Hop</title>
-  <meta name="description" content="A mobile-first Victorian op-shop field guide, rating notebook and hop planner." />
-  <link rel="preconnect" href="https://unpkg.com" crossorigin>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIINfQ3ynsMZJZQXJ/VcP7Dnd0vSxQVgWJM=" crossorigin="" />
-  <link rel="stylesheet" href="styles.css" />
-  <style>@media (max-width:600px){.compact-hero .hero-actions{display:flex;flex-direction:row;gap:.35rem;min-width:0}.compact-hero .hero-actions button{padding:.48rem .58rem;font-size:.7rem}}</style>
+  <meta name="description" content="A mobile-first Victorian field guide for op shops, books, records, vintage and coffee.">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="styles-v2.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand-wrap">
+    <div class="topbar-inner">
       <a class="brand" href="#top" aria-label="Op-Shop-Hop home">
         <span class="brand-mark">OSH</span>
-        <span><strong>Op‑Shop‑Hop</strong><small>Victoria thrift field notes</small></span>
+        <span class="brand-copy"><strong>Op-Shop-Hop</strong><small>Naarm + Victoria field notes</small></span>
       </a>
       <div class="profile-tools">
-        <label for="profileSelect">Hopper</label>
-        <select id="profileSelect" aria-label="Active profile"></select>
-        <button class="icon-btn" id="newProfileBtn" type="button" title="New profile">＋</button>
+        <select id="profileSelect" aria-label="Active hopper"></select>
+        <button id="newProfileBtn" class="icon" type="button" aria-label="New hopper">＋</button>
+        <button id="settingsBtn" class="icon" type="button" aria-label="Settings">⚙</button>
       </div>
     </div>
   </header>
 
-  <main id="top">
-    <section class="hero compact-hero">
+  <main id="top" class="app">
+    <section class="intro">
       <div>
-        <p class="eyebrow">VICTORIA · FIELD GUIDE · NOTEBOOK</p>
-        <h1>Op‑shop‑hop.</h1>
-        <p class="lede">Find the shops around you, rate the good bits, remember where to go back.</p>
+        <p class="eyebrow">FIND · NOTE · HOP</p>
+        <h1>Good stuff nearby.</h1>
+        <p>Op shops, books, records, vintage and the necessary coffee.</p>
       </div>
-      <div class="hero-actions">
-        <button id="categoriesBtn" type="button">Tune review form</button>
-        <button id="dataBtn" type="button">Profiles & backup</button>
-      </div>
-      <p class="data-status" id="dataStatus">Loading the local field guide…</p>
     </section>
 
-    <section class="locator-shell" aria-label="Choose a starting location">
-      <div class="locator-copy">
-        <p class="eyebrow">START HERE</p>
-        <h2>Where are we op‑shopping?</h2>
-      </div>
-      <div class="locator-controls">
-        <button id="locateBtn" class="primary" type="button">◎ Use my location</button>
-        <button id="followBtn" type="button">● Follow me live</button>
-        <div class="address-search">
-          <input id="locationSearch" type="search" placeholder="Suburb, street or postcode" autocomplete="street-address" aria-label="Suburb, street or postcode" />
-          <button id="locationSearchBtn" type="button">Find</button>
+    <section class="control-card" aria-label="Location and search area">
+      <div class="origin-head">
+        <div class="origin-title">
+          <p class="eyebrow">START</p>
+          <strong id="originLabel">Choose a starting point</strong>
+          <small id="originSub">Use your location or search an address</small>
+        </div>
+        <div class="origin-actions">
+          <button id="useLocationBtn" class="primary" type="button">◎ Use location</button>
+          <button id="followBtn" type="button">Follow me</button>
         </div>
       </div>
-      <div class="locator-meta">
-        <span id="locationHint">Or explore the map anywhere in Victoria.</span>
-        <button id="syncBtn" class="quiet-btn" type="button">↻ Refresh shop data</button>
-      </div>
-    </section>
 
-    <section class="layer-shell" aria-label="Map layers">
-      <div class="layer-head">
-        <div><p class="eyebrow">MAP LAYERS</p><strong>What are we hunting?</strong></div>
-        <button id="allLayersBtn" type="button">Show all</button>
+      <div class="location-search">
+        <input id="locationSearch" type="search" placeholder="Suburb, street or postcode" autocomplete="street-address" aria-label="Search suburb, street or postcode">
+        <button id="locationSearchBtn" type="button">Find</button>
       </div>
-      <div class="layer-options">
-        <label class="layer-chip opshop"><input type="checkbox" data-layer="opshop" checked><span>♻</span> Op shops</label>
-        <label class="layer-chip books"><input type="checkbox" data-layer="books"><span>▤</span> Books</label>
-        <label class="layer-chip records"><input type="checkbox" data-layer="records"><span>◉</span> Records</label>
-        <label class="layer-chip vintage"><input type="checkbox" data-layer="vintage"><span>✦</span> Vintage / second-hand</label>
-        <label class="layer-chip cafe"><input type="checkbox" data-layer="cafe"><span>☕</span> Cafés</label>
-      </div>
-      <div id="layerHint" class="layer-hint">Op shops only · combine any layers you like.</div>
-    </section>
 
-    <section class="view-toolbar" aria-label="View and saved places">
-      <div class="view-switch" role="group" aria-label="View">
-        <button type="button" data-view="map">Map only</button>
-        <button type="button" data-view="list">List only</button>
-        <button type="button" data-view="split">Map + list</button>
+      <div class="scope-row" aria-label="Geographic scope">
+        <button class="scope-chip" data-scope="near" type="button">Near me</button>
+        <button class="scope-chip" data-scope="inner" type="button">Inner Melbourne</button>
+        <button class="scope-chip" data-scope="metro" type="button">Melbourne</button>
+        <button class="scope-chip" data-scope="vic" type="button">Victoria</button>
       </div>
-      <div class="saved-switch" role="group" aria-label="My saved map">
-        <span>My map</span>
-        <button type="button" data-saved="all" class="active">All</button>
-        <button type="button" data-saved="loved">♥ Loved</button>
-        <button type="button" data-saved="want">Want to go</button>
-        <button type="button" data-saved="visited">Visited</button>
-      </div>
-      <button id="searchMapBtn" class="quiet-btn" type="button">↻ Search this map</button>
-    </section>
 
-    <section class="map-shell map-first" aria-label="Op shop map">
-      <div id="map"></div>
-      <div class="map-note" id="mapNote">© OpenStreetMap contributors</div>
-    </section>
-
-    <section class="filters-shell" aria-label="Shop filters">
-      <div class="coverage-tabs" role="group" aria-label="Coverage">
-        <button data-coverage="inner" class="active" type="button">Inner Melbourne</button>
-        <button data-coverage="metro" type="button">All Melbourne</button>
-        <button data-coverage="vic" type="button">All Victoria</button>
-      </div>
-      <div class="filters-grid">
-        <label class="search-label">Search
-          <input id="searchInput" type="search" placeholder="shop, suburb, charity, #tag…" autocomplete="off" />
-        </label>
-        <label>Suburb
-          <select id="suburbSelect"><option value="">All suburbs</option></select>
-        </label>
-        <label>Region
-          <select id="regionSelect"><option value="">All regions</option></select>
-        </label>
-        <label>Sort
-          <select id="sortSelect">
-            <option value="rating">My rating</option>
-            <option value="suburb">Suburb A–Z</option>
-            <option value="name">Shop A–Z</option>
-            <option value="distance">Nearest to start</option>
-            <option value="distance-desc">Furthest from start</option>
-            <option value="recent">Recently reviewed</option>
+      <div class="scope-options">
+        <label id="radiusWrap">Radius
+          <select id="radiusSelect">
+            <option value="2">2 km</option>
+            <option value="5">5 km</option>
+            <option value="10">10 km</option>
+            <option value="25">25 km</option>
           </select>
         </label>
-      </div>
-      <div class="filter-actions">
-        <button id="hopSuburbBtn" type="button" disabled>＋ Hop this suburb</button>
-        <button id="addShopBtn" type="button">＋ Add missing shop</button>
+        <span id="scopeStatus" class="scope-status">Loading field guide…</span>
       </div>
     </section>
 
-    <section class="route-tray" id="routeTray" aria-live="polite">
-      <div><strong id="routeCount">0</strong> stops in this hop <span id="routeSummary"></span></div>
-      <div>
-        <button id="clearRouteBtn" type="button">Clear</button>
-        <button id="planRouteBtn" type="button" class="primary" disabled>Plan hop</button>
+    <section class="control-card" aria-label="Place layers">
+      <div class="layer-label">
+        <strong>What are we hunting?</strong>
+        <button id="allLayersBtn" type="button">Show all</button>
+      </div>
+      <div class="layer-row">
+        <label class="layer-chip" data-layer="opshop"><input type="checkbox"><span>♻</span> Op shops</label>
+        <label class="layer-chip" data-layer="books"><input type="checkbox"><span>▤</span> Books</label>
+        <label class="layer-chip" data-layer="records"><input type="checkbox"><span>◉</span> Records</label>
+        <label class="layer-chip" data-layer="vintage"><input type="checkbox"><span>✦</span> Vintage</label>
+        <label class="layer-chip" data-layer="cafe"><input type="checkbox"><span>☕</span> Cafés</label>
       </div>
     </section>
 
-    <section class="results-heading">
-      <div><p class="eyebrow">PLACES</p><h2 id="resultsTitle">Inner Melbourne</h2></div>
-      <div id="resultsCount" class="count-pill">0</div>
-    </section>
-    <section id="shopGrid" class="shop-grid" aria-live="polite"></section>
+    <div class="desktop-grid">
+      <section class="desktop-map">
+        <div class="map-panel" aria-label="Map of places">
+          <div id="map"></div>
+          <div class="map-overlay">
+            <span id="mapCount" class="map-badge">0 plotted</span>
+            <div class="map-tools">
+              <button id="searchMapBtn" type="button">↻ Search this map</button>
+              <button id="mapToggleBtn" type="button">Hide map</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="desktop-results">
+        <div class="results-head">
+          <div>
+            <p class="eyebrow">PLACES</p>
+            <h2 id="resultsTitle">Melbourne</h2>
+            <div id="resultsMeta" class="result-meta">0 places</div>
+          </div>
+          <div class="results-actions">
+            <select id="sortSelect" aria-label="Sort results"></select>
+          </div>
+        </div>
+
+        <div class="saved-row" aria-label="Saved places filter">
+          <button class="saved-chip" data-saved="all" type="button">All</button>
+          <button class="saved-chip" data-saved="loved" type="button">♥ Loved</button>
+          <button class="saved-chip" data-saved="want" type="button">Want to go</button>
+          <button class="saved-chip" data-saved="visited" type="button">Visited</button>
+        </div>
+
+        <div class="location-search" style="margin:.15rem 0 .55rem">
+          <input id="placeSearch" type="search" placeholder="Search these places, suburb or #tag" autocomplete="off" aria-label="Search results">
+          <button type="button" onclick="document.getElementById('placeSearch').value='';document.getElementById('placeSearch').dispatchEvent(new Event('input'))">Clear</button>
+        </div>
+
+        <section id="placeList" class="place-list" aria-live="polite"></section>
+      </section>
+    </div>
   </main>
 
-  <dialog id="modal" class="modal">
-    <form method="dialog" class="modal-shell" id="modalShell">
-      <div class="modal-head">
-        <div id="modalTitle"></div>
-        <button value="cancel" class="icon-btn close" aria-label="Close">×</button>
+  <div id="routeTray" class="route-tray hidden" aria-live="polite">
+    <div><strong><span id="routeCount">0</span> stops in this hop</strong><small id="routeText"></small></div>
+    <div><button id="clearRouteBtn" type="button">Clear</button><button id="planRouteBtn" class="primary" type="button">Plan hop</button></div>
+  </div>
+
+  <dialog id="locationPrompt" class="dialog">
+    <div class="dialog-shell">
+      <div class="dialog-body location-prompt">
+        <div class="hero-dot">◎</div>
+        <p class="eyebrow">FIRST THING</p>
+        <h2>Find good stuff near you?</h2>
+        <p>Op-Shop-Hop can use your location to show the nearest places in whichever layers you choose. This is a one-off location check; live following stays off unless you explicitly switch it on.</p>
+        <div class="dialog-actions">
+          <button id="allowLocationBtn" class="primary" type="button">Use my location</button>
+          <button id="browseWithoutBtn" type="button">Browse without location</button>
+        </div>
       </div>
-      <div id="modalBody" class="modal-body"></div>
-    </form>
+    </div>
   </dialog>
 
-  <template id="shopCardTemplate">
-    <article class="shop-card">
-      <div class="shop-card-top">
-        <div>
-          <div class="shop-meta"></div>
-          <h3 class="shop-name"></h3>
-          <p class="shop-address"></p>
-          <p class="shop-distance"></p>
-        </div>
-        <button class="fav-btn" type="button" aria-label="Favourite">♡</button>
-      </div>
-      <div class="rating-line"></div>
-      <div class="tag-row"></div>
-      <div class="card-actions">
-        <button class="review-btn primary" type="button">Rate / note</button>
-        <button class="hop-btn" type="button">＋ Hop</button>
-        <button class="maps-btn" type="button">Directions</button>
-        <button class="nearby-btn" type="button">Around here</button>
-      </div>
-    </article>
-  </template>
+  <dialog id="modal" class="dialog">
+    <div class="dialog-shell">
+      <div class="dialog-head"><h2 id="modalTitle"></h2><button id="modalClose" class="icon" type="button" aria-label="Close">×</button></div>
+      <div id="modalBody" class="dialog-body"></div>
+    </div>
+  </dialog>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="seed-stores.js"></script>
-  <script src="app.js"></script>
+  <script src="app-v2.js"></script>
 </body>
 </html>
