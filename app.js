@@ -33,7 +33,7 @@
   let shops = [...(window.OP_SHOP_SEEDS || [])];
   let filtered = [];
   const LAYER_KEY = "op-shop-hop-layers-v1";
-  const VIEW_KEY = "op-shop-hop-view-v1";
+  const VIEW_KEY = "op-shop-hop-view-v2";
   const SAVED_FILTER_KEY = "op-shop-hop-saved-filter-v1";
   const ALL_LAYERS = ["opshop","books","records","vintage","cafe"];
   let activeCoverage = "inner";
@@ -91,7 +91,10 @@
     if("ResizeObserver" in window){
       new ResizeObserver(()=>requestAnimationFrame(()=>map.invalidateSize(false))).observe($("map"));
     }
-    window.addEventListener("orientationchange",()=>setTimeout(()=>map.invalidateSize(false),180));
+    window.addEventListener("orientationchange",hardResizeMap);
+    window.addEventListener("resize",hardResizeMap);
+    window.addEventListener("pageshow",hardResizeMap);
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden)hardResizeMap();});
   }
 
   function wireUI(){
@@ -249,8 +252,15 @@
   function layerLabel(v){return ({opshop:"Op shop",books:"Books",records:"Records",vintage:"Vintage / second-hand",cafe:"Café"})[v]||"Place";}
   function layerGlyph(v){return ({opshop:"♻",books:"▤",records:"◉",vintage:"✦",cafe:"☕"})[v]||"•";}
   function syncLayerUI(){document.querySelectorAll("[data-layer]").forEach(cb=>cb.checked=activeLayers.has(cb.dataset.layer));const all=ALL_LAYERS.every(x=>activeLayers.has(x));$("allLayersBtn").textContent=all?"Op shops only":"Show all";const labels=[...activeLayers].map(layerLabel);$("layerHint").textContent=`${labels.join(" + ")} · combine any layers you like.`;}
-  function loadView(){const saved=localStorage.getItem(VIEW_KEY);if(["map","list","split"].includes(saved))return saved;return matchMedia("(max-width: 700px)").matches?"map":"split";}
-  function setView(view){activeView=["map","list","split"].includes(view)?view:"split";localStorage.setItem(VIEW_KEY,activeView);document.body.dataset.view=activeView;document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===activeView));setTimeout(()=>map?.invalidateSize(false),40);}
+  function loadView(){const saved=localStorage.getItem(VIEW_KEY);if(["map","list","split"].includes(saved))return saved;return "split";}
+  function hardResizeMap(){
+    if(!map)return;
+    [0,80,220,500].forEach(ms=>setTimeout(()=>{
+      map.invalidateSize({animate:false,pan:false});
+      map.eachLayer(layer=>{if(typeof layer.redraw==="function") layer.redraw();});
+    },ms));
+  }
+  function setView(view){activeView=["map","list","split"].includes(view)?view:"split";localStorage.setItem(VIEW_KEY,activeView);document.body.dataset.view=activeView;document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===activeView));hardResizeMap();}
   function syncSavedUI(){document.querySelectorAll("[data-saved]").forEach(b=>b.classList.toggle("active",b.dataset.saved===savedFilter));}
   function passesSavedFilter(s,p){if(savedFilter==="all")return true;if(savedFilter==="loved")return (p.favourites||[]).includes(s.id);const status=p.reviews?.[s.id]?.status;return savedFilter==="want"?status==="want":savedFilter==="visited"?status==="visited":true;}
   function distanceLabel(km){return km<1?`${Math.round(km*1000)} m`:`${km<10?km.toFixed(1):Math.round(km)} km`;}
@@ -352,7 +362,7 @@
     }else if(pts.length&&activeCoverage!=="vic"){
       const bounds=L.latLngBounds(pts);if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:13,animate:false});
     }else if(activeCoverage==="vic")map.setView([-36.9,144.4],7,{animate:false});
-    requestAnimationFrame(()=>map.invalidateSize(false));
+    hardResizeMap();
   }
 
   function renderRouteTray(){

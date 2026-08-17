@@ -95,3 +95,13 @@ body[data-view="map"] .map-first #map{height:min(68dvh,760px);min-height:440px}
   body[data-view="map"] .map-first{margin:.45rem 0}.map-first #map{height:58dvh;min-height:390px}
   body[data-view="list"] .layer-shell{margin-bottom:.35rem}
 }
+
+
+/* v1.3.1 Safari/mobile map sizing */
+.map-shell,#map,.leaflet-container{width:100%;max-width:100%}
+#map{position:relative;display:block}
+.leaflet-map-pane,.leaflet-tile-pane,.leaflet-tile-container{will-change:transform}
+@media(max-width:700px){
+  body[data-view="split"] .map-first #map{height:48dvh;min-height:340px}
+  body[data-view="split"] .results-heading{padding-top:1rem}
+}
