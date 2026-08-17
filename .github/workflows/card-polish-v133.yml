@@ -1,0 +1,40 @@
+name: Polish Op-Shop-Hop cards v1.3.3
+on:
+  push:
+    branches: [feature/card-polish-v1-3-3]
+    paths:
+      - scripts/polish_cards_v133.py
+      - .github/workflows/card-polish-v133.yml
+jobs:
+  polish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply card polish
+        run: python scripts/polish_cards_v133.py
+      - name: JavaScript syntax
+        run: node --check app.js
+      - name: Behaviour assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          app=Path('app.js').read_text()
+          css=Path('styles.css').read_text()
+          assert 'Mapped location' not in app
+          assert 'cleanDisplayName(s)' in app
+          assert 'street address unavailable' in app
+          assert 's.operator?` · ${esc(s.operator)}`' not in app
+          assert 'rating-empty' in app and 'Not rated yet' in app
+          assert '.tag-row:empty{display:none}' in css
+          assert '.view-toolbar{position:relative;top:auto' in css
+          print('v1.3.3 assertions passed')
+          PY
+      - name: Commit polish
+        run: |
+          git config user.name "Mx Hud Harding"
+          git config user.email "58031940+MusicOfScience@users.noreply.github.com"
+          git add app.js styles.css
+          git diff --cached --quiet || git commit -m "Polish mobile cards and location hierarchy"
+          git push
