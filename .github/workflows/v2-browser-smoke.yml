@@ -1,0 +1,55 @@
+name: Browser smoke test Op-Shop-Hop v2
+on:
+  push:
+    branches: [feature/op-shop-hop-v2]
+    paths:
+      - app-v2.js
+      - styles-v2.css
+      - index.html
+      - .github/workflows/v2-browser-smoke.yml
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Playwright Chromium
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 --silent
+          npx playwright install --with-deps chromium
+      - name: Run browser smoke test
+        run: |
+          python3 -m http.server 4173 >/tmp/osh-server.log 2>&1 &
+          cat > /tmp/smoke.mjs <<'JS'
+          import { chromium } from 'playwright';
+          const browser = await chromium.launch({headless:true});
+          const page = await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
+          const errors=[];
+          page.on('pageerror', e=>errors.push(String(e)));
+          page.on('console', m=>{ if(m.type()==='error') console.log('console-error:',m.text()); });
+          await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded',timeout:30000});
+          await page.waitForSelector('#locationPrompt[open]',{timeout:10000});
+          await page.click('#browseWithoutBtn');
+          await page.waitForSelector('.place-card',{timeout:15000});
+          await page.waitForSelector('#map canvas',{timeout:15000});
+          const mapBox=await page.locator('#map').boundingBox();
+          const canvasBox=await page.locator('#map canvas').first().boundingBox();
+          if(!mapBox||mapBox.width<350||mapBox.height<300) throw new Error(`Bad map box ${JSON.stringify(mapBox)}`);
+          if(!canvasBox||canvasBox.width<350||canvasBox.height<300) throw new Error(`Bad map canvas ${JSON.stringify(canvasBox)}`);
+          const cards=await page.locator('.place-card').count();
+          if(cards<1) throw new Error('No place cards rendered');
+          const mapped=await page.locator('#mapCount').innerText();
+          if(!/plotted/.test(mapped)) throw new Error(`No map plotted status: ${mapped}`);
+          if(errors.length) throw new Error(`Page errors: ${errors.join(' | ')}`);
+          await page.screenshot({path:'v2-mobile-smoke.png',fullPage:true});
+          console.log({cards,mapBox,canvasBox,mapped});
+          await browser.close();
+          JS
+          node /tmp/smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v2-mobile-smoke
+          path: v2-mobile-smoke.png
