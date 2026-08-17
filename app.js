@@ -327,10 +327,21 @@
     const suburb=s.suburb||suburbFromAddress(s);const postcode=postcodeFor(s);
     let street=String(s.address||"").split(",")[0].trim();
     street=street.replace(/\bVIC\b/ig,"").replace(/\b3\d{3}\b/g,"").replace(/\s{2,}/g," ").trim();
-    if(!street&&s.lat!=null)street="Mapped location";
+    if(suburb&&normalize(street)===normalize(suburb))street="";
     const parts=[street,suburb,postcode].filter(Boolean);
     const unique=[];parts.forEach(x=>{if(!unique.some(y=>normalize(y)===normalize(x)))unique.push(x);});
-    return unique.join(" · ")||"Address incomplete in source data";
+    if(street)return unique.join(" · ");
+    const place=[suburb,postcode].filter(Boolean);
+    return place.length?`${place.join(" · ")} · street address unavailable`:"Street address unavailable";
+  }
+
+  function cleanDisplayName(s){
+    const raw=String(s.name||"").trim();
+    const suburb=String(s.suburb||"").trim();
+    if(!suburb)return raw;
+    const escaped=suburb.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    const cleaned=raw.replace(new RegExp(`\s*[—–-]\s*${escaped}\s*$`,"i"),"").trim();
+    return cleaned||raw;
   }
 
   function refreshFilters(){
@@ -390,13 +401,13 @@
     const tpl=$("shopCardTemplate"); const p=profile();
     filtered.forEach(s=>{
       const layer=s.layer||"opshop";const node=tpl.content.cloneNode(true);const card=node.querySelector(".shop-card");card.dataset.id=s.id;card.dataset.layer=layer;
-      node.querySelector(".shop-meta").innerHTML=`<span class="shop-type">${layerGlyph(layer)} ${esc(layerLabel(layer))}</span> · ${esc(s.suburb||regionFor(s))}${s.operator?` · ${esc(s.operator)}`:""}`;
-      node.querySelector(".shop-name").textContent=s.name;
+      node.querySelector(".shop-meta").innerHTML=`<span class="shop-type">${layerGlyph(layer)} ${esc(layerLabel(layer))}</span>`;
+      node.querySelector(".shop-name").textContent=cleanDisplayName(s);
       node.querySelector(".shop-address").textContent=displayAddress(s);
       const distanceEl=node.querySelector(".shop-distance");
       if(userLocation&&s.lat!=null){distanceEl.textContent=`${distanceLabel(distanceFromUser(s))} from ${userLocation.label||"start"}`;}else{distanceEl.hidden=true;}
       const r=p.reviews[s.id]; const avg=reviewAverage(r);
-      if(layer==="opshop") node.querySelector(".rating-line").innerHTML=avg?`<span class="score-big">${avg.toFixed(1)}</span><span class="score-label">/10 your average<br>${Object.keys(r.ratings||{}).length} categories rated</span>`:`<span class="score-big">—</span><span class="score-label">not rated yet</span>`;
+      if(layer==="opshop") node.querySelector(".rating-line").innerHTML=avg?`<span class="score-big">${avg.toFixed(1)}</span><span class="score-label">/10 your average<br>${Object.keys(r.ratings||{}).length} categories rated</span>`:`<span class="rating-empty">Not rated yet</span>`;
       else node.querySelector(".rating-line").innerHTML=`<span class="score-big">${layerGlyph(layer)}</span><span class="score-label">${r?.notes?"saved in your field notes":layer==="cafe"?"coffee stop · check current reviews":"side-quest stop · save a note"}</span>`;
       node.querySelector(".tag-row").innerHTML=(r?.tags||[]).slice(0,5).map(tagChip).join("");
       const fav=node.querySelector(".fav-btn");fav.textContent=(p.favourites||[]).includes(s.id)?"♥":"♡";fav.classList.toggle("is-fav",(p.favourites||[]).includes(s.id));fav.addEventListener("click",()=>toggleFavourite(s.id));
@@ -416,7 +427,7 @@
       const icon=L.divIcon({className:"osh-pin-shell",html:`<span class="osh-pin ${layer}">${layerGlyph(layer)}</span>`,iconSize:[30,30],iconAnchor:[15,15]});
       const marker=L.marker([s.lat,s.lon],{icon}).addTo(markers);
       const action=layer==="opshop"?"Rate / note":layer==="cafe"?"Coffee note / reviews":"Save / note";
-      marker.bindPopup(`<div class="map-popup"><strong>${esc(s.name)}</strong><small>${esc(layerLabel(layer))}${s.suburb?` · ${esc(s.suburb)}`:""}${avg&&layer==="opshop"?` · ${avg.toFixed(1)}/10`:""}</small><button type="button" data-map-action="${esc(s.id)}">${action}</button></div>`);
+      marker.bindPopup(`<div class="map-popup"><strong>${esc(cleanDisplayName(s))}</strong><small>${esc(layerLabel(layer))}${s.suburb?` · ${esc(s.suburb)}`:""}${avg&&layer==="opshop"?` · ${avg.toFixed(1)}/10`:""}</small><button type="button" data-map-action="${esc(s.id)}">${action}</button></div>`);
       marker.on("popupopen",()=>{document.querySelector(`[data-map-action="${cssEsc(s.id)}"]`)?.addEventListener("click",()=>layer==="opshop"?openReview(s):openDiscoveryNote(s));});
       pts.push([s.lat,s.lon]);
     });
