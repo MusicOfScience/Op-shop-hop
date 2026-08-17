@@ -462,8 +462,8 @@
   function osmToCafe(el){const t=el.tags||{};const lat=el.lat??el.center?.lat,lon=el.lon??el.center?.lon;if(lat==null||lon==null)return null;const name=(t.name||t.brand||"").trim();if(!name)return null;const suburb=t["addr:suburb"]||t["addr:place"]||t["addr:city"]||t["addr:town"]||"";const parts=[t["addr:housenumber"],t["addr:street"]].filter(Boolean).join(" ");const address=[parts,suburb,t["addr:postcode"]].filter(Boolean).join(", ");return{id:`cafe-${el.type}-${el.id}`,name,address,suburb,postcode:t["addr:postcode"]||"",operator:t.operator||t.brand||"",layer:"cafe",lat,lon,opening_hours:t.opening_hours||"",website:t.website||t["contact:website"]||"",wheelchair:t.wheelchair||"",source:"OpenStreetMap",osm:true,osmType:el.type,osmId:el.id};}
 
   async function refreshCafeLayer(){
-    if(!activeLayers.has("cafe"))return;const serial=++cafeRequestSerial;const c=userLocation?{lat:userLocation.lat,lng:userLocation.lon}:map.getCenter();$("layerHint").textContent="Finding coffee around this part of Naarm…";
-    const query=`[out:json][timeout:20];nwr["amenity"="cafe"](around:3000,${c.lat},${c.lng});out center tags;`;
+    if(!activeLayers.has("cafe"))return;const serial=++cafeRequestSerial;const centre=map.getCenter();const lat=userLocation?userLocation.lat:centre.lat;const lon=userLocation?userLocation.lon:centre.lng;$("layerHint").textContent="Finding coffee around this part of Naarm…";
+    const query=`[out:json][timeout:20];nwr["amenity"="cafe"](around:3000,${lat},${lon});out center tags;`;
     try{const json=await overpass(query);if(serial!==cafeRequestSerial)return;const cafes=(json.elements||[]).map(osmToCafe).filter(Boolean);shops=shops.filter(s=>(s.layer||"opshop")!=="cafe");cafes.forEach(x=>shops.push(x));refreshFilters();syncLayerUI();render();$("layerHint").textContent=`${cafes.length} cafés around this map area · tap one to check current reviews.`;}catch(e){$("layerHint").textContent="Coffee layer couldn’t refresh just now; the other map layers are still available.";}
   }
 
