@@ -1,0 +1,30 @@
+name: Finalise Op-Shop-Hop v1.3 navigation
+
+on:
+  push:
+    branches:
+      - feature/navigation-v1-3
+    paths:
+      - scripts/finalise_navigation_v13.py
+      - .github/workflows/finalise-navigation-v13.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalise:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/navigation-v1-3
+      - run: python scripts/finalise_navigation_v13.py
+      - run: node --check app.js
+      - name: Commit final fixes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.js
+          git commit -m "Finish v1.3 saved and discovery lifecycle"
+          git push origin HEAD:feature/navigation-v1-3
