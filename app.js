@@ -78,7 +78,7 @@
     loadCachedOSM();
     refreshFilters();
     render();
-    refreshOSM(false).finally(()=>{if(activeLayers.has("cafe"))refreshCafeLayer();});
+    refreshOSM(false).finally(async()=>{await refreshDiscoveryLayers(true);if(activeLayers.has("cafe"))refreshCafeLayer();});
   }
 
   function initMap(){
@@ -366,7 +366,7 @@
   function addCurrentSuburbToHop(){const suburb=$("suburbSelect").value;if(!suburb)return;filtered.filter(s=>s.suburb===suburb).slice(0,12).forEach(s=>routeIds.add(s.id));renderRouteTray();renderCards();}
   function clearRouteDrawing(){if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}if(parkingMarker){map.removeLayer(parkingMarker);parkingMarker=null;}}
 
-  function toggleFavourite(id){const p=profile();p.favourites=p.favourites||[];const i=p.favourites.indexOf(id);i>=0?p.favourites.splice(i,1):p.favourites.push(id);saveState();renderCards();}
+  function toggleFavourite(id){const p=profile();p.favourites=p.favourites||[];const i=p.favourites.indexOf(id);i>=0?p.favourites.splice(i,1):p.favourites.push(id);saveState();render();}
 
   function reviewSearchUrl(shop){const q=[shop.name,shop.address||shop.suburb,"Victoria"].filter(Boolean).join(" ");return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;}
 
