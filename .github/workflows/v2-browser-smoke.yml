@@ -28,10 +28,17 @@ jobs:
           const browser = await chromium.launch({headless:true});
           const page = await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
           const errors=[];
+          const consoleErrors=[];
           page.on('pageerror', e=>errors.push(String(e)));
-          page.on('console', m=>{ if(m.type()==='error') console.log('console-error:',m.text()); });
+          page.on('console', m=>{ if(m.type()==='error') consoleErrors.push(m.text()); });
           await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded',timeout:30000});
-          await page.waitForSelector('#locationPrompt[open]',{timeout:10000});
+          await page.waitForTimeout(1800);
+          const promptState=await page.locator('#locationPrompt').evaluate(el=>({open:el.open,outer:el.outerHTML.slice(0,240)}));
+          console.log({promptState,errors,consoleErrors});
+          if(!promptState.open){
+            await page.screenshot({path:'v2-mobile-smoke.png',fullPage:true});
+            throw new Error(`First-launch prompt did not open. pageErrors=${errors.join(' | ')} consoleErrors=${consoleErrors.join(' | ')}`);
+          }
           await page.click('#browseWithoutBtn');
           await page.waitForSelector('.place-card',{timeout:15000});
           await page.waitForSelector('#map canvas',{timeout:15000});
@@ -50,6 +57,7 @@ jobs:
           JS
           node smoke.mjs
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: v2-mobile-smoke
           path: v2-mobile-smoke.png
