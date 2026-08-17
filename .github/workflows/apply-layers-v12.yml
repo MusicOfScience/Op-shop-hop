@@ -1,0 +1,37 @@
+name: Apply Op-Shop-Hop v1.2 layers
+
+on:
+  push:
+    branches:
+      - feature/layers-v1-2-patch
+    paths:
+      - scripts/patch_layers_v12.py
+      - .github/workflows/apply-layers-v12.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/layers-v1-2-patch
+      - name: Apply layer patch
+        run: python scripts/patch_layers_v12.py
+      - name: Check JavaScript syntax
+        run: node --check app.js
+      - name: Commit patched app
+        shell: bash
+        run: |
+          if git diff --quiet -- index.html styles.css seed-stores.js app.js; then
+            echo "No changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- index.html styles.css seed-stores.js app.js
+          git commit -m "Add map layers, coffee stops and data-quality fixes"
+          git push origin HEAD:feature/layers-v1-2-patch
