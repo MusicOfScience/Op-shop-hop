@@ -50,7 +50,7 @@
   const $ = id => document.getElementById(id);
   const qa = sel => [...document.querySelectorAll(sel)];
   function clone(x){return JSON.parse(JSON.stringify(x));}
-  const normalize = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g," ").trim();
+  function normalize(s){return String(s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g," ").trim();}
   const esc = s => String(s ?? "").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 
   function loadProfileState(){
