@@ -34,10 +34,16 @@ jobs:
           import { chromium } from 'playwright';
           const browser=await chromium.launch({headless:true});
           const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
-          const errors=[];
+          const errors=[]; const consoleErrors=[];
           page.on('pageerror',e=>errors.push(String(e)));
+          page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text())});
           await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded',timeout:30000});
-          await page.waitForSelector('#locationPrompt[open]',{timeout:10000});
+          await page.waitForTimeout(1800);
+          const prompt=await page.locator('#locationPrompt').evaluate(el=>({open:el.open}));
+          if(!prompt.open){
+            await page.screenshot({path:'v2-mobile-final.png',fullPage:true});
+            throw new Error(`Prompt did not open. pageErrors=${errors.join(' | ')} consoleErrors=${consoleErrors.join(' | ')}`);
+          }
           await page.click('#browseWithoutBtn');
           await page.waitForSelector('.place-card',{timeout:15000});
           await page.waitForSelector('#map canvas',{timeout:15000});
