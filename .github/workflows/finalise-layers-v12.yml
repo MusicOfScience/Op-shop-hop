@@ -1,0 +1,31 @@
+name: Finalise Op-Shop-Hop v1.2 layers
+
+on:
+  push:
+    branches:
+      - feature/layers-v1-2-patch
+    paths:
+      - scripts/finalise_layers_v12.py
+      - .github/workflows/finalise-layers-v12.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalise:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/layers-v1-2-patch
+      - run: python scripts/finalise_layers_v12.py
+      - run: node --check app.js
+      - name: Commit final lifecycle fixes
+        shell: bash
+        run: |
+          if git diff --quiet -- app.js; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- app.js
+          git commit -m "Persist cafe layer lifecycle and map-centre refresh"
+          git push origin HEAD:feature/layers-v1-2-patch
