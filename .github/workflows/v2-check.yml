@@ -1,0 +1,40 @@
+name: Validate Op-Shop-Hop v2
+on:
+  push:
+    branches: [feature/op-shop-hop-v2]
+    paths:
+      - app-v2.js
+      - styles-v2.css
+      - index.html
+      - .github/workflows/v2-check.yml
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: node --check app-v2.js
+      - name: Structural assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          js=Path('app-v2.js').read_text()
+          html=Path('index.html').read_text()
+          css=Path('styles-v2.css').read_text()
+          ids=set(re.findall(r'id="([^"]+)"',html))
+          refs=set(re.findall(r'\$\("([^"]+)"\)',js))
+          missing=sorted(refs-ids)
+          assert not missing, f'Missing HTML IDs used by JS: {missing}'
+          assert 'maplibregl.Map' in js
+          assert 'leaflet' not in html.lower()
+          assert 'Map + list' not in html
+          assert 'Near me' in html and 'Inner Melbourne' in html and '>Melbourne<' in html and '>Victoria<' in html
+          assert 'locationPrompt' in html and 'Use my location' in html and 'Browse without location' in html
+          assert 'Mapped location' not in js
+          assert 'address not listed' in js
+          assert 'places-circles' in js
+          assert 'prefs.layers' in js
+          assert '#map' in css
+          print('v2 structural assertions passed')
+          PY
