@@ -1,0 +1,31 @@
+name: Fix Op-Shop-Hop mobile map v1.3.1
+on:
+  push:
+    branches: [feature/navigation-v1-3]
+    paths:
+      - scripts/fix_mobile_map_v131.py
+      - .github/workflows/fix-mobile-map-v131.yml
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: python scripts/fix_mobile_map_v131.py
+      - name: JavaScript syntax
+        run: node --check app.js
+      - name: Behaviour assertions
+        run: |
+          grep -q 'const VIEW_KEY = "op-shop-hop-view-v2"' app.js
+          grep -q 'return "split";' app.js
+          grep -q 'function hardResizeMap' app.js
+          grep -q 'Map only' index.html
+          grep -q 'List only' index.html
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.js index.html styles.css
+          git diff --cached --quiet || git commit -m "Fix mobile map sizing and default stacked results"
+          git push
