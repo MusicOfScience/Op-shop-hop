@@ -1,0 +1,40 @@
+name: Apply Op-Shop-Hop v1.3 navigation
+
+on:
+  push:
+    branches:
+      - feature/navigation-v1-3
+    paths:
+      - scripts/patch_navigation_v13.py
+      - .github/workflows/apply-navigation-v13.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/navigation-v1-3
+      - name: Apply v1.3 patch
+        run: python scripts/patch_navigation_v13.py
+      - name: Check JavaScript syntax
+        run: node --check app.js
+      - name: Check required UI hooks
+        run: |
+          grep -q 'data-view="map"' index.html
+          grep -q 'data-saved="loved"' index.html
+          grep -q 'id="followBtn"' index.html
+          grep -q 'Furthest from start' index.html
+          grep -q 'refreshDiscoveryLayers' app.js
+          grep -q 'ResizeObserver' app.js
+      - name: Commit patched app
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.js index.html styles.css
+          git commit -m "Add map-list navigation, saved maps and live follow"
+          git push origin HEAD:feature/navigation-v1-3
