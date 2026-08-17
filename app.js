@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "op-shop-hop-v1";
-  const CACHE_KEY = "op-shop-hop-osm-cache-v2";
+  const CACHE_KEY = "op-shop-hop-osm-cache-v3";
   const DEFAULT_CATEGORIES = [
     {id:"clothes",name:"Clothes",mode:"always"},
     {id:"books",name:"Books",mode:"always"},
@@ -33,11 +33,19 @@
   let shops = [...(window.OP_SHOP_SEEDS || [])];
   let filtered = [];
   const LAYER_KEY = "op-shop-hop-layers-v1";
+  const VIEW_KEY = "op-shop-hop-view-v1";
+  const SAVED_FILTER_KEY = "op-shop-hop-saved-filter-v1";
   const ALL_LAYERS = ["opshop","books","records","vintage","cafe"];
   let activeCoverage = "inner";
   let activeLayers = loadLayers();
+  let activeView = loadView();
+  let savedFilter = localStorage.getItem(SAVED_FILTER_KEY) || "all";
   let userLocation = null;
+  let followWatchId = null;
+  let followMode = false;
   let cafeRequestSerial = 0;
+  let discoveryRequestSerial = 0;
+  let lastDiscoveryCentre = null;
   let map = null;
   let markers = null;
   let routeLayer = null;
@@ -64,6 +72,8 @@
     wireUI();
     renderProfileSelect();
     syncLayerUI();
+    syncSavedUI();
+    setView(activeView);
     mergeManualShops();
     loadCachedOSM();
     refreshFilters();
@@ -78,6 +88,10 @@
       attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
     markers = L.layerGroup().addTo(map);
+    if("ResizeObserver" in window){
+      new ResizeObserver(()=>requestAnimationFrame(()=>map.invalidateSize(false))).observe($("map"));
+    }
+    window.addEventListener("orientationchange",()=>setTimeout(()=>map.invalidateSize(false),180));
   }
 
   function wireUI(){
@@ -90,19 +104,27 @@
     $("locateBtn").addEventListener("click", locateUser);
     $("locationSearchBtn").addEventListener("click", geocodeLocationSearch);
     $("locationSearch").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();geocodeLocationSearch();}});
+    $("followBtn").addEventListener("click",toggleFollow);
+    document.querySelectorAll("[data-view]").forEach(btn=>btn.addEventListener("click",()=>setView(btn.dataset.view)));
+    document.querySelectorAll("[data-saved]").forEach(btn=>btn.addEventListener("click",()=>{
+      savedFilter=btn.dataset.saved;localStorage.setItem(SAVED_FILTER_KEY,savedFilter);syncSavedUI();render();
+    }));
+    $("searchMapBtn").addEventListener("click",async()=>{await refreshDiscoveryLayers(true);if(activeLayers.has("cafe"))await refreshCafeLayer();});
     document.querySelectorAll("[data-layer]").forEach(cb=>cb.addEventListener("change",async()=>{
       const layer=cb.dataset.layer;
       cb.checked?activeLayers.add(layer):activeLayers.delete(layer);
       if(!activeLayers.size){activeLayers.add("opshop");document.querySelector('[data-layer="opshop"]').checked=true;}
       localStorage.setItem(LAYER_KEY,JSON.stringify([...activeLayers]));syncLayerUI();render();
+      if(cb.checked && (layer==="books"||layer==="records")) await refreshDiscoveryLayers(true);
       if(layer==="cafe"&&cb.checked) await refreshCafeLayer();
     }));
     $("allLayersBtn").addEventListener("click",async()=>{
       const allOn=ALL_LAYERS.every(x=>activeLayers.has(x));activeLayers=new Set(allOn?["opshop"]:ALL_LAYERS);
       localStorage.setItem(LAYER_KEY,JSON.stringify([...activeLayers]));syncLayerUI();render();
+      await refreshDiscoveryLayers(true);
       if(activeLayers.has("cafe")) await refreshCafeLayer();
     });
-    $("syncBtn").addEventListener("click",async()=>{await refreshOSM(true);if(activeLayers.has("cafe"))await refreshCafeLayer();});
+    $("syncBtn").addEventListener("click",async()=>{await refreshOSM(true);await refreshDiscoveryLayers(true);if(activeLayers.has("cafe"))await refreshCafeLayer();});
     $("categoriesBtn").addEventListener("click",openCategorySettings);
     $("dataBtn").addEventListener("click",openDataSettings);
     $("newProfileBtn").addEventListener("click",()=>openProfileSetup(false));
@@ -138,7 +160,7 @@
     }
     $("syncBtn").disabled=true; $("syncBtn").textContent="Refreshing…";
     $("dataStatus").textContent="Refreshing op shops, books, records and second-hand places across Victoria…";
-    const query=`[out:json][timeout:50];area["ISO3166-2"="AU-VIC"]["boundary"="administrative"]->.vic;(nwr["shop"="charity"](area.vic);nwr["shop"="second_hand"](area.vic);nwr["shop"="clothes"]["second_hand"~"^(yes|only)$"](area.vic);nwr["shop"="books"]["second_hand"~"^(yes|only)$"](area.vic);nwr["shop"="books"]["name"~"second.?hand|used|book market",i](area.vic);nwr["shop"="music"]["second_hand"~"^(yes|only)$"](area.vic);nwr["shop"="music"]["name"~"record|records|vinyl|cds",i](area.vic););out center tags;`;
+    const query=`[out:json][timeout:50];area["ISO3166-2"="AU-VIC"]["boundary"="administrative"]->.vic;(nwr["shop"="charity"](area.vic);nwr["shop"="second_hand"](area.vic);nwr["shop"="clothes"]["second_hand"~"^(yes|only)$"](area.vic););out center tags;`;
     try{
       const json=await overpass(query);
       const parsed=(json.elements||[]).map(osmToShop).filter(Boolean);
@@ -161,6 +183,25 @@
       }catch(e){lastErr=e;}
     }
     throw lastErr||new Error("No Overpass endpoint available");
+  }
+
+  async function refreshDiscoveryLayers(force=false){
+    if(!activeLayers.has("books")&&!activeLayers.has("records")) return;
+    const centre=userLocation?{lat:userLocation.lat,lng:userLocation.lon}:map.getCenter();
+    if(!force&&lastDiscoveryCentre&&haversine(centre.lat,centre.lng,lastDiscoveryCentre.lat,lastDiscoveryCentre.lon)<2)return;
+    const serial=++discoveryRequestSerial;
+    $("layerHint").textContent="Finding bookshops and record shops around this map…";
+    const query=`[out:json][timeout:25];(nwr["shop"="books"](around:25000,${centre.lat},${centre.lng});nwr["shop"="music"](around:25000,${centre.lat},${centre.lng}););out center tags;`;
+    try{
+      const json=await overpass(query);if(serial!==discoveryRequestSerial)return;
+      const incoming=(json.elements||[]).map(osmToShop).filter(x=>x&&(x.layer==="books"||x.layer==="records"));
+      shops=shops.filter(s=>!s.discoveryLocal);
+      incoming.forEach(x=>{x.discoveryLocal=true;});
+      mergeOSM(incoming);lastDiscoveryCentre={lat:centre.lat,lon:centre.lng};refreshFilters();render();
+      $("layerHint").textContent=`${incoming.filter(x=>x.layer==="books").length} bookshops · ${incoming.filter(x=>x.layer==="records").length} record/music shops around this map. Pan or change the start, then Search this map.`;
+    }catch(e){
+      $("layerHint").textContent="Local book/record discovery could not refresh just now. Op shops and cached places are still available.";
+    }
   }
 
   function classifyLayer(t,name){
@@ -208,6 +249,11 @@
   function layerLabel(v){return ({opshop:"Op shop",books:"Books",records:"Records",vintage:"Vintage / second-hand",cafe:"Café"})[v]||"Place";}
   function layerGlyph(v){return ({opshop:"♻",books:"▤",records:"◉",vintage:"✦",cafe:"☕"})[v]||"•";}
   function syncLayerUI(){document.querySelectorAll("[data-layer]").forEach(cb=>cb.checked=activeLayers.has(cb.dataset.layer));const all=ALL_LAYERS.every(x=>activeLayers.has(x));$("allLayersBtn").textContent=all?"Op shops only":"Show all";const labels=[...activeLayers].map(layerLabel);$("layerHint").textContent=`${labels.join(" + ")} · combine any layers you like.`;}
+  function loadView(){const saved=localStorage.getItem(VIEW_KEY);if(["map","list","split"].includes(saved))return saved;return matchMedia("(max-width: 700px)").matches?"map":"split";}
+  function setView(view){activeView=["map","list","split"].includes(view)?view:"split";localStorage.setItem(VIEW_KEY,activeView);document.body.dataset.view=activeView;document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b.dataset.view===activeView));setTimeout(()=>map?.invalidateSize(false),40);}
+  function syncSavedUI(){document.querySelectorAll("[data-saved]").forEach(b=>b.classList.toggle("active",b.dataset.saved===savedFilter));}
+  function passesSavedFilter(s,p){if(savedFilter==="all")return true;if(savedFilter==="loved")return (p.favourites||[]).includes(s.id);const status=p.reviews?.[s.id]?.status;return savedFilter==="want"?status==="want":savedFilter==="visited"?status==="visited":true;}
+  function distanceLabel(km){return km<1?`${Math.round(km*1000)} m`:`${km<10?km.toFixed(1):Math.round(km)} km`;}
 
   function refreshFilters(){
     const suburbs=[...new Set(shops.map(s=>s.suburb).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
@@ -222,6 +268,7 @@
     const p=profile(); const q=normalize($("searchInput").value); const suburb=$("suburbSelect").value; const region=$("regionSelect").value;
     filtered=shops.filter(s=>{
       if(!activeLayers.has(s.layer||"opshop")) return false;
+      if(!passesSavedFilter(s,p)) return false;
       if(!inCoverage(s,activeCoverage)) return false;
       if(suburb && s.suburb!==suburb) return false;
       if(region && regionFor(s)!==region) return false;
@@ -253,6 +300,7 @@
       if(mode==="name") return a.name.localeCompare(b.name);
       if(mode==="suburb") return (a.suburb||"zzz").localeCompare(b.suburb||"zzz")||a.name.localeCompare(b.name);
       if(mode==="distance") return distanceFromUser(a)-distanceFromUser(b);
+      if(mode==="distance-desc") return distanceFromUser(b)-distanceFromUser(a);
       if(mode==="recent") return Date.parse(p.reviews[b.id]?.updatedAt||0)-Date.parse(p.reviews[a.id]?.updatedAt||0);
       return score(b)-score(a)||a.name.localeCompare(b.name);
     });
@@ -267,6 +315,8 @@
       node.querySelector(".shop-meta").innerHTML=`<span class="shop-type">${layerGlyph(layer)} ${esc(layerLabel(layer))}</span> · ${esc(s.suburb||regionFor(s))}${s.operator?` · ${esc(s.operator)}`:""}`;
       node.querySelector(".shop-name").textContent=s.name;
       node.querySelector(".shop-address").textContent=s.address||[s.suburb,s.postcode].filter(Boolean).join(" ")||(s.lat!=null?"Location mapped · street address not supplied":"Address incomplete in source data");
+      const distanceEl=node.querySelector(".shop-distance");
+      if(userLocation&&s.lat!=null){distanceEl.textContent=`${distanceLabel(distanceFromUser(s))} from ${userLocation.label||"start"}`;}else{distanceEl.hidden=true;}
       const r=p.reviews[s.id]; const avg=reviewAverage(r);
       if(layer==="opshop") node.querySelector(".rating-line").innerHTML=avg?`<span class="score-big">${avg.toFixed(1)}</span><span class="score-label">/10 your average<br>${Object.keys(r.ratings||{}).length} categories rated</span>`:`<span class="score-big">—</span><span class="score-label">not rated yet</span>`;
       else node.querySelector(".rating-line").innerHTML=`<span class="score-big">${layerGlyph(layer)}</span><span class="score-label">${r?.notes?"saved in your field notes":layer==="cafe"?"coffee stop · check current reviews":"side-quest stop · save a note"}</span>`;
@@ -293,10 +343,16 @@
       pts.push([s.lat,s.lon]);
     });
     if($("mapNote")) $("mapNote").textContent=pts.length?`${pts.length} places plotted · ${[...activeLayers].map(layerLabel).join(" + ")} · © OpenStreetMap contributors`:`No mapped places in this view · © OpenStreetMap contributors`;
-    if(!userLocation){
-      if(pts.length&&activeCoverage!=="vic"){const bounds=L.latLngBounds(pts);if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:13,animate:false});}
-      else if(activeCoverage==="vic")map.setView([-36.9,144.4],7,{animate:false});
-    }
+    if(userLocation){
+      if(followMode){map.setView([userLocation.lat,userLocation.lon],15,{animate:false});}
+      else{
+        const nearest=filtered.filter(s=>s.lat!=null&&s.lon!=null).sort((a,b)=>distanceFromUser(a)-distanceFromUser(b)).slice(0,25);
+        const frame=[[userLocation.lat,userLocation.lon],...nearest.map(s=>[s.lat,s.lon])];const bounds=L.latLngBounds(frame);if(bounds.isValid())map.fitBounds(bounds.pad(.10),{maxZoom:14,animate:false});
+      }
+    }else if(pts.length&&activeCoverage!=="vic"){
+      const bounds=L.latLngBounds(pts);if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:13,animate:false});
+    }else if(activeCoverage==="vic")map.setView([-36.9,144.4],7,{animate:false});
+    requestAnimationFrame(()=>map.invalidateSize(false));
   }
 
   function renderRouteTray(){
@@ -421,23 +477,22 @@
     const body=$("modalBody");body.querySelector("#exportBtn").addEventListener("click",()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`op-shop-hop-backup-${todayLocal()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);});body.querySelector("#importBtn").addEventListener("click",()=>body.querySelector("#importFile").click());body.querySelector("#importFile").addEventListener("change",async e=>{const f=e.target.files[0];if(!f)return;try{const incoming=JSON.parse(await f.text());if(!incoming.profiles||!incoming.activeProfileId)throw new Error();localStorage.setItem(STORAGE_KEY,JSON.stringify(incoming));location.reload();}catch(err){alert("That file is not an Op-Shop-Hop backup.");}});$("modal").showModal();
   }
 
-  function setOrigin(lat,lon,label){
+  function setOrigin(lat,lon,label,opts={}){
     userLocation={lat,lon,label};
     if(locationMarker) map.removeLayer(locationMarker);
-    locationMarker=L.circleMarker([lat,lon],{radius:8,weight:3,fillOpacity:.85}).addTo(map).bindPopup(`<strong>${esc(label||"Starting point")}</strong>`);
-    map.setView([lat,lon],14,{animate:false});
-    $("locationHint").textContent=label?`Starting near ${label}`:"Starting from your location";
+    locationMarker=L.circleMarker([lat,lon],{radius:9,weight:3,fillOpacity:.88}).addTo(map).bindPopup(`<strong>${esc(label||"Starting point")}</strong>`);
+    $("locationHint").textContent=followMode?"Following your live location · distances update as you move":label?`Starting near ${label}`:"Starting from your location";
     const cbdDistance=haversine(lat,lon,-37.8136,144.9631);
     activeCoverage=cbdDistance<=15?"inner":cbdDistance<=60?"metro":"vic";
     document.querySelectorAll("[data-coverage]").forEach(btn=>btn.classList.toggle("active",btn.dataset.coverage===activeCoverage));
     $("sortSelect").value="distance";
     render();
-    map.setView([lat,lon],14,{animate:false});
-    if(activeLayers.has("cafe")) refreshCafeLayer();
+    if(!opts.quiet){refreshDiscoveryLayers(true);if(activeLayers.has("cafe"))refreshCafeLayer();}
   }
 
   function locateUser(){
     if(!navigator.geolocation){alert("Location is not available in this browser.");return;}
+    if(followMode)stopFollow();
     $("locateBtn").textContent="Locating…";
     navigator.geolocation.getCurrentPosition(pos=>{
       $("locateBtn").textContent="✓ Using my location";
@@ -445,8 +500,22 @@
     },()=>{$("locateBtn").textContent="◎ Use my location";alert("Location permission was not available. You can type a suburb, street or postcode instead.");},{enableHighAccuracy:false,timeout:10000,maximumAge:300000});
   }
 
+  function toggleFollow(){followMode?stopFollow():startFollow();}
+  function startFollow(){
+    if(!navigator.geolocation){alert("Live location is not available in this browser.");return;}
+    followMode=true;$("followBtn").classList.add("active");$("followBtn").textContent="● Following me";
+    followWatchId=navigator.geolocation.watchPosition(pos=>{
+      const lat=pos.coords.latitude,lon=pos.coords.longitude;const moved=userLocation?haversine(userLocation.lat,userLocation.lon,lat,lon):999;
+      setOrigin(lat,lon,"your live location",{quiet:true});
+      if(moved>.8&&activeLayers.has("cafe"))refreshCafeLayer();
+      if(moved>2&&(activeLayers.has("books")||activeLayers.has("records")))refreshDiscoveryLayers(true);
+    },()=>{stopFollow();alert("Live location permission was lost. You can still use a fixed starting point.");},{enableHighAccuracy:true,timeout:15000,maximumAge:10000});
+  }
+  function stopFollow(){if(followWatchId!=null)navigator.geolocation.clearWatch(followWatchId);followWatchId=null;followMode=false;$("followBtn").classList.remove("active");$("followBtn").textContent="● Follow me live";if(userLocation)$("locationHint").textContent=`Start fixed near ${userLocation.label||"your last location"}`;render();}
+
   async function geocodeLocationSearch(){
     const input=$("locationSearch");const q=input.value.trim();if(!q)return;
+    if(followMode)stopFollow();
     const btn=$("locationSearchBtn");btn.disabled=true;btn.textContent="Finding…";$("locationHint").textContent="Looking for that place…";
     try{
       const query=/victoria|\bvic\b|australia/i.test(q)?q:`${q}, Victoria, Australia`;

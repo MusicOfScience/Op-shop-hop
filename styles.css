@@ -77,3 +77,21 @@ main{max-width:1200px;margin:auto;padding:1rem}
 .osh-pin-shell{background:transparent;border:0}.osh-pin{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;border:2px solid #171717;background:#fff;box-shadow:0 4px 10px rgba(0,0,0,.2);font-size:13px;font-weight:950}.osh-pin.opshop{background:var(--acid)}.osh-pin.books{background:#fff}.osh-pin.records{background:#e9e4ff}.osh-pin.vintage{background:#ffe7dc}.osh-pin.cafe{background:#eadbc6}
 .shop-type{display:inline-flex;align-items:center;gap:.25rem;font-weight:950}
 @media (max-width:600px){.layer-shell{padding:.65rem;margin:.3rem 0 .55rem}.layer-head strong{font-size:.9rem}.layer-options{margin-right:-.65rem;padding-right:.65rem}.layer-chip{font-size:.72rem;padding:.45rem .58rem}}
+
+
+/* v1.3 field navigation */
+#map{width:100%}
+.locator-controls{grid-template-columns:auto auto 1fr}
+#followBtn.active{background:var(--acid);border-color:var(--ink)}
+.view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:.55rem;flex-wrap:wrap;margin:.45rem 0 .55rem;padding:.55rem .65rem;border:1px solid var(--line);border-radius:14px;background:var(--paper-2)}
+.view-switch,.saved-switch{display:flex;align-items:center;gap:.28rem;overflow:auto;scrollbar-width:none}.view-switch::-webkit-scrollbar,.saved-switch::-webkit-scrollbar{display:none}.saved-switch span{font-size:.68rem;font-weight:900;color:var(--muted);white-space:nowrap;margin-right:.15rem}.view-switch button,.saved-switch button{padding:.45rem .58rem;font-size:.72rem;white-space:nowrap}.view-switch button.active,.saved-switch button.active{background:var(--acid);border-color:var(--ink)}
+.shop-distance{margin:.28rem 0 0;font-size:.72rem;font-weight:800;color:var(--ink)}
+body[data-view="list"] .map-shell{display:none}
+body[data-view="map"] .filters-shell,body[data-view="map"] .results-heading,body[data-view="map"] .shop-grid{display:none}
+body[data-view="map"] .map-first #map{height:min(68dvh,760px);min-height:440px}
+@media(max-width:700px){
+  .locator-controls{grid-template-columns:1fr 1fr}.locator-controls .address-search{grid-column:1/-1}.locator-controls>.primary,#followBtn{width:100%;font-size:.82rem;padding:.78rem .55rem}
+  .view-toolbar{position:sticky;top:53px;z-index:790;padding:.42rem;background:rgba(251,248,241,.96);backdrop-filter:blur(14px)}.view-switch{order:1}.saved-switch{order:3;width:100%}#searchMapBtn{order:2;margin-left:auto}
+  body[data-view="map"] .map-first{margin:.45rem 0}.map-first #map{height:58dvh;min-height:390px}
+  body[data-view="list"] .layer-shell{margin-bottom:.35rem}
+}

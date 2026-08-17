@@ -47,6 +47,7 @@
       </div>
       <div class="locator-controls">
         <button id="locateBtn" class="primary" type="button">◎ Use my location</button>
+        <button id="followBtn" type="button">● Follow me live</button>
         <div class="address-search">
           <input id="locationSearch" type="search" placeholder="Suburb, street or postcode" autocomplete="street-address" aria-label="Suburb, street or postcode" />
           <button id="locationSearchBtn" type="button">Find</button>
@@ -71,6 +72,22 @@
         <label class="layer-chip cafe"><input type="checkbox" data-layer="cafe"><span>☕</span> Cafés</label>
       </div>
       <div id="layerHint" class="layer-hint">Op shops only · combine any layers you like.</div>
+    </section>
+
+    <section class="view-toolbar" aria-label="View and saved places">
+      <div class="view-switch" role="group" aria-label="View">
+        <button type="button" data-view="map">Map</button>
+        <button type="button" data-view="list">List</button>
+        <button type="button" data-view="split">Map + list</button>
+      </div>
+      <div class="saved-switch" role="group" aria-label="My saved map">
+        <span>My map</span>
+        <button type="button" data-saved="all" class="active">All</button>
+        <button type="button" data-saved="loved">♥ Loved</button>
+        <button type="button" data-saved="want">Want to go</button>
+        <button type="button" data-saved="visited">Visited</button>
+      </div>
+      <button id="searchMapBtn" class="quiet-btn" type="button">↻ Search this map</button>
     </section>
 
     <section class="map-shell map-first" aria-label="Op shop map">
@@ -99,7 +116,8 @@
             <option value="rating">My rating</option>
             <option value="suburb">Suburb A–Z</option>
             <option value="name">Shop A–Z</option>
-            <option value="distance">Distance from me</option>
+            <option value="distance">Nearest to start</option>
+            <option value="distance-desc">Furthest from start</option>
             <option value="recent">Recently reviewed</option>
           </select>
         </label>
@@ -119,7 +137,7 @@
     </section>
 
     <section class="results-heading">
-      <div><p class="eyebrow">SHOPS</p><h2 id="resultsTitle">Inner Melbourne</h2></div>
+      <div><p class="eyebrow">PLACES</p><h2 id="resultsTitle">Inner Melbourne</h2></div>
       <div id="resultsCount" class="count-pill">0</div>
     </section>
     <section id="shopGrid" class="shop-grid" aria-live="polite"></section>
@@ -142,6 +160,7 @@
           <div class="shop-meta"></div>
           <h3 class="shop-name"></h3>
           <p class="shop-address"></p>
+          <p class="shop-distance"></p>
         </div>
         <button class="fav-btn" type="button" aria-label="Favourite">♡</button>
       </div>
