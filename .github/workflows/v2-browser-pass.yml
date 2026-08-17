@@ -1,0 +1,55 @@
+name: Verify Op-Shop-Hop v2 mobile runtime
+on:
+  push:
+    branches: [feature/op-shop-hop-v2]
+    paths:
+      - .github/workflows/v2-browser-pass.yml
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 24}
+      - run: |
+          node --check app-v2.js
+          npm init -y >/dev/null 2>&1
+          npm install playwright@1.55.0 --silent
+          npx playwright install --with-deps chromium
+      - name: Mobile runtime
+        run: |
+          python3 -m http.server 4173 >/tmp/server.log 2>&1 &
+          cat > smoke.mjs <<'JS'
+          import {chromium} from 'playwright';
+          const browser=await chromium.launch({headless:true});
+          const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
+          const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
+          await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded',timeout:30000});
+          await page.waitForTimeout(1200);
+          const promptOpen=await page.locator('#locationPrompt').evaluate(el=>el.open);
+          if(!promptOpen) throw new Error(`Prompt closed; pageErrors=${errors.join(' | ')}`);
+          await page.click('#browseWithoutBtn');
+          await page.waitForSelector('.place-card',{timeout:15000});
+          await page.waitForSelector('#map canvas',{timeout:15000});
+          await page.waitForTimeout(1000);
+          const mapBox=await page.locator('#map').boundingBox();
+          const canvasBox=await page.locator('#map canvas').first().boundingBox();
+          const cards=await page.locator('.place-card').count();
+          const mapped=await page.locator('#mapCount').innerText();
+          const first=await page.locator('.place-card').first().innerText();
+          if(!mapBox||mapBox.width<350||mapBox.height<300)throw new Error(`map ${JSON.stringify(mapBox)}`);
+          if(!canvasBox||canvasBox.width<350||canvasBox.height<300)throw new Error(`canvas ${JSON.stringify(canvasBox)}`);
+          if(cards<1)throw new Error('no cards');
+          if(!/\d+ plotted/.test(mapped))throw new Error(`mapped=${mapped}`);
+          if(/Mapped location/i.test(first))throw new Error('legacy address label');
+          if(errors.length)throw new Error(`pageErrors=${errors.join(' | ')}`);
+          await page.screenshot({path:'v2-mobile-pass.png',fullPage:true});
+          console.log(JSON.stringify({cards,mapped,mapBox,canvasBox,first:first.slice(0,220)}));
+          await browser.close();
+          JS
+          node smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v2-mobile-pass
+          path: v2-mobile-pass.png
