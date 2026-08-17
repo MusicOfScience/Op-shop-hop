@@ -58,9 +58,24 @@
       </div>
     </section>
 
+    <section class="layer-shell" aria-label="Map layers">
+      <div class="layer-head">
+        <div><p class="eyebrow">MAP LAYERS</p><strong>What are we hunting?</strong></div>
+        <button id="allLayersBtn" type="button">Show all</button>
+      </div>
+      <div class="layer-options">
+        <label class="layer-chip opshop"><input type="checkbox" data-layer="opshop" checked><span>♻</span> Op shops</label>
+        <label class="layer-chip books"><input type="checkbox" data-layer="books"><span>▤</span> Books</label>
+        <label class="layer-chip records"><input type="checkbox" data-layer="records"><span>◉</span> Records</label>
+        <label class="layer-chip vintage"><input type="checkbox" data-layer="vintage"><span>✦</span> Vintage / second-hand</label>
+        <label class="layer-chip cafe"><input type="checkbox" data-layer="cafe"><span>☕</span> Cafés</label>
+      </div>
+      <div id="layerHint" class="layer-hint">Op shops only · combine any layers you like.</div>
+    </section>
+
     <section class="map-shell map-first" aria-label="Op shop map">
       <div id="map"></div>
-      <div class="map-note">© OpenStreetMap contributors · tap a pin to rate or note</div>
+      <div class="map-note" id="mapNote">© OpenStreetMap contributors</div>
     </section>
 
     <section class="filters-shell" aria-label="Shop filters">

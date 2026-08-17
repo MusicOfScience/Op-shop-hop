@@ -47,4 +47,4 @@ window.OP_SHOP_SEEDS = [
   {name:"Salvos Stores — Southern Cross",address:"669 Bourke Street, Melbourne VIC",suburb:"Melbourne",postcode:"3000",operator:"Salvos Stores",source:"Official"},
   {name:"Salvos Stores — Springvale",address:"Shop 3/819–823 Princes Highway, Springvale VIC",suburb:"Springvale",postcode:"3171",operator:"Salvos Stores",source:"Official"},
   {name:"Vinnies — Brunswick",address:"107 Sydney Road, Brunswick VIC",suburb:"Brunswick",postcode:"3056",operator:"Vinnies",source:"Official / local index"}
-].map((s,i)=>({...s,id:`seed-${i+1}`,lat:null,lon:null,opening_hours:"",website:"",wheelchair:"",osm:false}));
+].map((s,i)=>({...s,id:`seed-${i+1}`,layer:"opshop",lat:null,lon:null,opening_hours:"",website:"",wheelchair:"",osm:false}));

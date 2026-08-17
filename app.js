@@ -2,7 +2,7 @@
   "use strict";
 
   const STORAGE_KEY = "op-shop-hop-v1";
-  const CACHE_KEY = "op-shop-hop-osm-cache-v1";
+  const CACHE_KEY = "op-shop-hop-osm-cache-v2";
   const DEFAULT_CATEGORIES = [
     {id:"clothes",name:"Clothes",mode:"always"},
     {id:"books",name:"Books",mode:"always"},
@@ -32,8 +32,12 @@
   const state = loadState();
   let shops = [...(window.OP_SHOP_SEEDS || [])];
   let filtered = [];
+  const LAYER_KEY = "op-shop-hop-layers-v1";
+  const ALL_LAYERS = ["opshop","books","records","vintage","cafe"];
   let activeCoverage = "inner";
+  let activeLayers = loadLayers();
   let userLocation = null;
+  let cafeRequestSerial = 0;
   let map = null;
   let markers = null;
   let routeLayer = null;
@@ -59,6 +63,7 @@
     initMap();
     wireUI();
     renderProfileSelect();
+    syncLayerUI();
     mergeManualShops();
     loadCachedOSM();
     refreshFilters();
@@ -85,7 +90,19 @@
     $("locateBtn").addEventListener("click", locateUser);
     $("locationSearchBtn").addEventListener("click", geocodeLocationSearch);
     $("locationSearch").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();geocodeLocationSearch();}});
-    $("syncBtn").addEventListener("click",()=>refreshOSM(true));
+    document.querySelectorAll("[data-layer]").forEach(cb=>cb.addEventListener("change",async()=>{
+      const layer=cb.dataset.layer;
+      cb.checked?activeLayers.add(layer):activeLayers.delete(layer);
+      if(!activeLayers.size){activeLayers.add("opshop");document.querySelector('[data-layer="opshop"]').checked=true;}
+      localStorage.setItem(LAYER_KEY,JSON.stringify([...activeLayers]));syncLayerUI();render();
+      if(layer==="cafe"&&cb.checked) await refreshCafeLayer();
+    }));
+    $("allLayersBtn").addEventListener("click",async()=>{
+      const allOn=ALL_LAYERS.every(x=>activeLayers.has(x));activeLayers=new Set(allOn?["opshop"]:ALL_LAYERS);
+      localStorage.setItem(LAYER_KEY,JSON.stringify([...activeLayers]));syncLayerUI();render();
+      if(activeLayers.has("cafe")) await refreshCafeLayer();
+    });
+    $("syncBtn").addEventListener("click",async()=>{await refreshOSM(true);if(activeLayers.has("cafe"))await refreshCafeLayer();});
     $("categoriesBtn").addEventListener("click",openCategorySettings);
     $("dataBtn").addEventListener("click",openDataSettings);
     $("newProfileBtn").addEventListener("click",()=>openProfileSetup(false));
@@ -120,8 +137,8 @@
       try{const c=JSON.parse(cacheRaw);if(Date.now()-c.savedAt<86400000) return;}catch(e){}
     }
     $("syncBtn").disabled=true; $("syncBtn").textContent="Refreshing…";
-    $("dataStatus").textContent="Looking across Victoria for charity and second-hand shops…";
-    const query=`[out:json][timeout:45];area["ISO3166-2"="AU-VIC"]["boundary"="administrative"]->.vic;(nwr["shop"="charity"](area.vic);nwr["shop"="second_hand"](area.vic);nwr["shop"~"^(clothes|books|furniture|variety_store|music|electronics)$"]["second_hand"~"^(yes|only)$"](area.vic););out center tags;`;
+    $("dataStatus").textContent="Refreshing op shops, books, records and second-hand places across Victoria…";
+    const query=`[out:json][timeout:50];area["ISO3166-2"="AU-VIC"]["boundary"="administrative"]->.vic;(nwr["shop"="charity"](area.vic);nwr["shop"="second_hand"](area.vic);nwr["shop"="clothes"]["second_hand"~"^(yes|only)$"](area.vic);nwr["shop"="books"]["second_hand"~"^(yes|only)$"](area.vic);nwr["shop"="books"]["name"~"second.?hand|used|book market",i](area.vic);nwr["shop"="music"]["second_hand"~"^(yes|only)$"](area.vic);nwr["shop"="music"]["name"~"record|records|vinyl|cds",i](area.vic););out center tags;`;
     try{
       const json=await overpass(query);
       const parsed=(json.elements||[]).map(osmToShop).filter(Boolean);
@@ -146,15 +163,28 @@
     throw lastErr||new Error("No Overpass endpoint available");
   }
 
+  function classifyLayer(t,name){
+    const n=normalize(`${name} ${t.brand||""} ${t.operator||""}`);
+    if(t.shop==="charity"||/\bop shop\b|op-shop|salvo|salvation army|vinnies|vincent de paul|red cross|uniting|lifeline|brotherhood|sacred heart|save the children|helping hands|rspca|epilepsy|don bosco|rotary|legacy|savers/.test(n)) return "opshop";
+    if(t.shop==="books") return "books";
+    if(t.shop==="music"||/record|vinyl|\bcds?\b/.test(n)) return "records";
+    return "vintage";
+  }
+
   function osmToShop(el){
     const t=el.tags||{}; const lat=el.lat??el.center?.lat; const lon=el.lon??el.center?.lon;
     if(lat==null||lon==null) return null;
-    const name=t.name||t.brand||t.operator||"Unnamed second-hand shop";
-    const suburb=t["addr:suburb"]||t["addr:city"]||t["addr:town"]||t["addr:village"]||"";
+    const name=(t.name||t.brand||t.operator||"").trim();
+    if(!name||/^(bookshop|second[ -]?hand shop|charity shop|op shop)$/i.test(name)) return null;
+    const suburb=t["addr:suburb"]||t["addr:place"]||t["addr:city"]||t["addr:town"]||t["addr:village"]||t["is_in:suburb"]||"";
     const parts=[t["addr:housenumber"],t["addr:street"]].filter(Boolean).join(" ");
     const address=[parts,suburb,t["addr:postcode"]].filter(Boolean).join(", ");
-    return {id:`osm-${el.type}-${el.id}`,name,address,suburb,postcode:t["addr:postcode"]||"",operator:t.operator||t.brand||"",lat,lon,opening_hours:t.opening_hours||"",website:t.website||t["contact:website"]||"",wheelchair:t.wheelchair||"",source:"OpenStreetMap",osm:true,osmType:el.type,osmId:el.id};
+    return {id:`osm-${el.type}-${el.id}`,name,address,suburb,postcode:t["addr:postcode"]||"",operator:t.operator||t.brand||"",layer:classifyLayer(t,name),lat,lon,opening_hours:t.opening_hours||"",website:t.website||t["contact:website"]||"",wheelchair:t.wheelchair||"",source:"OpenStreetMap",osm:true,osmType:el.type,osmId:el.id};
   }
+
+  function canonicalOrg(v){const n=normalize(v);if(/salvo|salvation army/.test(n))return"salvos";if(/vinn|vincent de paul/.test(n))return"vinnies";if(/red cross/.test(n))return"redcross";if(/sacred heart/.test(n))return"sacredheart";if(/save the children/.test(n))return"savethechildren";if(/helping hands/.test(n))return"helpinghands";if(/brotherhood/.test(n))return"brotherhood";return n;}
+  function streetCore(v){const n=normalize(v).replace(/\bvic\b|\baustralia\b|\b\d{4}\b/g," ").replace(/\s+/g," ").trim();const m=n.match(/^(\d+[a-z]?(?:-\d+[a-z]?)?)\s+(.+?\b(?:street|st|road|rd|avenue|ave|highway|hwy|lane|ln|drive|dr|crescent|cres|parade|pde))\b/);return m?m[0]:"";}
+  function sameOrganisation(a,b){const aa=canonicalOrg(`${a.name||""} ${a.operator||""}`),bb=canonicalOrg(`${b.name||""} ${b.operator||""}`);return aa&&bb&&(aa===bb||aa.includes(bb)||bb.includes(aa));}
 
   function mergeOSM(osmShops){
     const byKey=new Map();
@@ -162,16 +192,22 @@
     shops.forEach(s=>byKey.set(key(s),s));
     osmShops.forEach(o=>{
       let match=byKey.get(key(o));
-      if(!match){
-        match=shops.find(s=>s.lat==null && s.suburb && o.suburb && normalize(s.suburb)===normalize(o.suburb) && fuzzyName(s.name,o.name));
+      if(!match&&o.address){
+        const oc=streetCore(o.address);
+        if(oc) match=shops.find(s=>streetCore(s.address)===oc&&(sameOrganisation(s,o)||fuzzyName(s.name,o.name)));
       }
-      if(match){Object.assign(match,{lat:o.lat,lon:o.lon,opening_hours:o.opening_hours||match.opening_hours,website:o.website||match.website,wheelchair:o.wheelchair||match.wheelchair,osm:true,osmId:o.osmId,osmType:o.osmType});}
+      if(!match&&o.suburb){match=shops.find(s=>s.lat==null&&s.suburb&&normalize(s.suburb)===normalize(o.suburb)&&(sameOrganisation(s,o)||fuzzyName(s.name,o.name)));}
+      if(match){Object.assign(match,{layer:match.layer||o.layer||"opshop",lat:o.lat,lon:o.lon,opening_hours:o.opening_hours||match.opening_hours,website:o.website||match.website,wheelchair:o.wheelchair||match.wheelchair,osm:true,osmId:o.osmId,osmType:o.osmType});}
       else shops.push(o);
     });
   }
 
   function fuzzyName(a,b){const aa=normalize(a).split(" ").filter(x=>x.length>2);const bb=normalize(b);return aa.filter(x=>bb.includes(x)).length>=Math.min(2,aa.length);}
   function normalize(s){return String(s||"").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g," ").trim();}
+  function loadLayers(){try{const x=JSON.parse(localStorage.getItem(LAYER_KEY));if(Array.isArray(x)&&x.length)return new Set(x.filter(v=>ALL_LAYERS.includes(v)));}catch(e){}return new Set(["opshop"]);}
+  function layerLabel(v){return ({opshop:"Op shop",books:"Books",records:"Records",vintage:"Vintage / second-hand",cafe:"Café"})[v]||"Place";}
+  function layerGlyph(v){return ({opshop:"♻",books:"▤",records:"◉",vintage:"✦",cafe:"☕"})[v]||"•";}
+  function syncLayerUI(){document.querySelectorAll("[data-layer]").forEach(cb=>cb.checked=activeLayers.has(cb.dataset.layer));const all=ALL_LAYERS.every(x=>activeLayers.has(x));$("allLayersBtn").textContent=all?"Op shops only":"Show all";const labels=[...activeLayers].map(layerLabel);$("layerHint").textContent=`${labels.join(" + ")} · combine any layers you like.`;}
 
   function refreshFilters(){
     const suburbs=[...new Set(shops.map(s=>s.suburb).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
@@ -185,6 +221,7 @@
   function render(){
     const p=profile(); const q=normalize($("searchInput").value); const suburb=$("suburbSelect").value; const region=$("regionSelect").value;
     filtered=shops.filter(s=>{
+      if(!activeLayers.has(s.layer||"opshop")) return false;
       if(!inCoverage(s,activeCoverage)) return false;
       if(suburb && s.suburb!==suburb) return false;
       if(region && regionFor(s)!==region) return false;
@@ -195,7 +232,8 @@
     sortShops(filtered,$("sortSelect").value,p);
     renderCards(); renderMap(); renderRouteTray();
     const coverageName={inner:"Inner Melbourne · ≤15 km CBD",metro:"Greater Melbourne · ≤60 km CBD",vic:"Victoria"}[activeCoverage];
-    $("resultsTitle").textContent=suburb?`${suburb} · ${coverageName}`:coverageName;
+    const layerName=[...activeLayers].map(layerLabel).join(" + ");
+    $("resultsTitle").textContent=suburb?`${suburb} · ${layerName}`:`${coverageName} · ${layerName}`;
     $("resultsCount").textContent=filtered.length;
   }
 
@@ -222,18 +260,19 @@
 
   function renderCards(){
     const grid=$("shopGrid"); grid.innerHTML="";
-    if(!filtered.length){grid.innerHTML='<div class="empty">No shops match this view. Try a wider coverage, clear a filter, or add the missing shop.</div>';return;}
+    if(!filtered.length){grid.innerHTML='<div class="empty">No places match this view. Try another layer, widen the area, or add the missing shop.</div>';return;}
     const tpl=$("shopCardTemplate"); const p=profile();
     filtered.forEach(s=>{
-      const node=tpl.content.cloneNode(true);const card=node.querySelector(".shop-card");card.dataset.id=s.id;
-      node.querySelector(".shop-meta").textContent=[s.suburb||regionFor(s),s.operator||"independent"].filter(Boolean).join(" · ");
+      const layer=s.layer||"opshop";const node=tpl.content.cloneNode(true);const card=node.querySelector(".shop-card");card.dataset.id=s.id;card.dataset.layer=layer;
+      node.querySelector(".shop-meta").innerHTML=`<span class="shop-type">${layerGlyph(layer)} ${esc(layerLabel(layer))}</span> · ${esc(s.suburb||regionFor(s))}${s.operator?` · ${esc(s.operator)}`:""}`;
       node.querySelector(".shop-name").textContent=s.name;
-      node.querySelector(".shop-address").textContent=s.address||[s.suburb,s.postcode].filter(Boolean).join(" ")||"Address incomplete in source data";
+      node.querySelector(".shop-address").textContent=s.address||[s.suburb,s.postcode].filter(Boolean).join(" ")||(s.lat!=null?"Location mapped · street address not supplied":"Address incomplete in source data");
       const r=p.reviews[s.id]; const avg=reviewAverage(r);
-      node.querySelector(".rating-line").innerHTML=avg?`<span class="score-big">${avg.toFixed(1)}</span><span class="score-label">/10 your average<br>${Object.keys(r.ratings||{}).length} categories rated</span>`:`<span class="score-big">—</span><span class="score-label">not rated yet</span>`;
+      if(layer==="opshop") node.querySelector(".rating-line").innerHTML=avg?`<span class="score-big">${avg.toFixed(1)}</span><span class="score-label">/10 your average<br>${Object.keys(r.ratings||{}).length} categories rated</span>`:`<span class="score-big">—</span><span class="score-label">not rated yet</span>`;
+      else node.querySelector(".rating-line").innerHTML=`<span class="score-big">${layerGlyph(layer)}</span><span class="score-label">${r?.notes?"saved in your field notes":layer==="cafe"?"coffee stop · check current reviews":"side-quest stop · save a note"}</span>`;
       node.querySelector(".tag-row").innerHTML=(r?.tags||[]).slice(0,5).map(tagChip).join("");
       const fav=node.querySelector(".fav-btn");fav.textContent=(p.favourites||[]).includes(s.id)?"♥":"♡";fav.classList.toggle("is-fav",(p.favourites||[]).includes(s.id));fav.addEventListener("click",()=>toggleFavourite(s.id));
-      node.querySelector(".review-btn").addEventListener("click",()=>openReview(s));
+      const reviewBtn=node.querySelector(".review-btn");reviewBtn.textContent=layer==="opshop"?"Rate / note":layer==="cafe"?"Coffee note / reviews":"Save / note";reviewBtn.addEventListener("click",()=>layer==="opshop"?openReview(s):openDiscoveryNote(s));
       const hop=node.querySelector(".hop-btn");hop.textContent=routeIds.has(s.id)?"✓ In hop":"＋ Hop";hop.addEventListener("click",()=>toggleHop(s.id));
       node.querySelector(".maps-btn").addEventListener("click",()=>openDirections(s));
       node.querySelector(".nearby-btn").addEventListener("click",()=>openNearby(s));
@@ -245,15 +284,19 @@
     markers.clearLayers();
     const pts=[];
     filtered.filter(s=>s.lat!=null&&s.lon!=null).forEach(s=>{
-      const r=profile().reviews[s.id];const avg=reviewAverage(r);
-      const marker=L.marker([s.lat,s.lon]).addTo(markers);
-      marker.bindPopup(`<div class="map-popup"><strong>${esc(s.name)}</strong><small>${esc(s.suburb||"")}${avg?` · ${avg.toFixed(1)}/10`:""}</small><button type="button" data-map-review="${esc(s.id)}">Rate / note</button></div>`);
-      marker.on("popupopen",()=>{document.querySelector(`[data-map-review="${cssEsc(s.id)}"]`)?.addEventListener("click",()=>openReview(s));});
+      const layer=s.layer||"opshop";const r=profile().reviews[s.id];const avg=reviewAverage(r);
+      const icon=L.divIcon({className:"osh-pin-shell",html:`<span class="osh-pin ${layer}">${layerGlyph(layer)}</span>`,iconSize:[30,30],iconAnchor:[15,15]});
+      const marker=L.marker([s.lat,s.lon],{icon}).addTo(markers);
+      const action=layer==="opshop"?"Rate / note":layer==="cafe"?"Coffee note / reviews":"Save / note";
+      marker.bindPopup(`<div class="map-popup"><strong>${esc(s.name)}</strong><small>${esc(layerLabel(layer))}${s.suburb?` · ${esc(s.suburb)}`:""}${avg&&layer==="opshop"?` · ${avg.toFixed(1)}/10`:""}</small><button type="button" data-map-action="${esc(s.id)}">${action}</button></div>`);
+      marker.on("popupopen",()=>{document.querySelector(`[data-map-action="${cssEsc(s.id)}"]`)?.addEventListener("click",()=>layer==="opshop"?openReview(s):openDiscoveryNote(s));});
       pts.push([s.lat,s.lon]);
     });
-    if(pts.length && activeCoverage!=="vic"){
-      const bounds=L.latLngBounds(pts);if(bounds.isValid()) map.fitBounds(bounds.pad(.08),{maxZoom:13,animate:false});
-    }else if(activeCoverage==="vic") map.setView([-36.9,144.4],7,{animate:false});
+    if($("mapNote")) $("mapNote").textContent=pts.length?`${pts.length} places plotted · ${[...activeLayers].map(layerLabel).join(" + ")} · © OpenStreetMap contributors`:`No mapped places in this view · © OpenStreetMap contributors`;
+    if(!userLocation){
+      if(pts.length&&activeCoverage!=="vic"){const bounds=L.latLngBounds(pts);if(bounds.isValid())map.fitBounds(bounds.pad(.08),{maxZoom:13,animate:false});}
+      else if(activeCoverage==="vic")map.setView([-36.9,144.4],7,{animate:false});
+    }
   }
 
   function renderRouteTray(){
@@ -268,6 +311,15 @@
   function clearRouteDrawing(){if(routeLayer){map.removeLayer(routeLayer);routeLayer=null;}if(parkingMarker){map.removeLayer(parkingMarker);parkingMarker=null;}}
 
   function toggleFavourite(id){const p=profile();p.favourites=p.favourites||[];const i=p.favourites.indexOf(id);i>=0?p.favourites.splice(i,1):p.favourites.push(id);saveState();renderCards();}
+
+  function reviewSearchUrl(shop){const q=[shop.name,shop.address||shop.suburb,"Victoria"].filter(Boolean).join(" ");return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;}
+
+  function openDiscoveryNote(shop){
+    const p=profile();const existing=p.reviews[shop.id]||{ratings:{},categoryNames:{},notes:"",tags:[],visitedAt:"",status:"want",updatedAt:""};const review=structuredCloneSafe(existing);const layer=shop.layer||"vintage";
+    setModalTitle(`<p class="eyebrow">${esc(layerLabel(layer).toUpperCase())}</p><h2>${esc(shop.name)}</h2><div class="muted">${esc(shop.address||shop.suburb||"")}</div>`);
+    const body=document.createElement("div");body.innerHTML=`<label class="field-label">Field note<textarea id="discoveryNotes" placeholder="Worth the detour? Great coffee? Strong vinyl wall? Weird book room?">${esc(review.notes||"")}</textarea></label><div class="modal-section"><label class="field-label">Hashtags<input id="discoveryTags" value="${esc((review.tags||[]).map(t=>`#${t}`).join(" "))}" placeholder="#coffee #vinyl #books #detour"></label></div><div class="modal-section form-grid"><label>Visited<input id="discoveryVisited" type="date" value="${esc(review.visitedAt||todayLocal())}"></label><label>Status<select id="discoveryStatus"><option value="visited" ${review.status==="visited"?"selected":""}>Visited</option><option value="want" ${review.status!=="visited"&&review.status!=="skip"?"selected":""}>Want to go</option><option value="skip" ${review.status==="skip"?"selected":""}>Skip for now</option></select></label></div><div class="modal-actions"><a target="_blank" rel="noopener" href="${reviewSearchUrl(shop)}"><button type="button">Check current reviews</button></a><button type="button" id="saveDiscovery" class="primary">Save note</button></div>`;
+    $("modalBody").replaceChildren(body);body.querySelector("#saveDiscovery").addEventListener("click",()=>{review.notes=body.querySelector("#discoveryNotes").value.trim();review.tags=parseTags(body.querySelector("#discoveryTags").value);review.visitedAt=body.querySelector("#discoveryVisited").value;review.status=body.querySelector("#discoveryStatus").value;review.updatedAt=new Date().toISOString();p.reviews[shop.id]=review;saveState();$("modal").close();render();});$("modal").showModal();
+  }
 
   function openReview(shop){
     const p=profile();const existing=p.reviews[shop.id]||{ratings:{},categoryNames:{},notes:"",tags:[],visitedAt:"",updatedAt:""};
@@ -381,6 +433,7 @@
     $("sortSelect").value="distance";
     render();
     map.setView([lat,lon],14,{animate:false});
+    if(activeLayers.has("cafe")) refreshCafeLayer();
   }
 
   function locateUser(){
@@ -404,6 +457,14 @@
       const label=(hit.display_name||q).split(",").slice(0,3).join(",");setOrigin(Number(hit.lat),Number(hit.lon),label);
     }catch(e){$("locationHint").textContent="Address lookup failed just now. You can still pan the map or use your location.";}
     finally{btn.disabled=false;btn.textContent="Find";}
+  }
+
+  function osmToCafe(el){const t=el.tags||{};const lat=el.lat??el.center?.lat,lon=el.lon??el.center?.lon;if(lat==null||lon==null)return null;const name=(t.name||t.brand||"").trim();if(!name)return null;const suburb=t["addr:suburb"]||t["addr:place"]||t["addr:city"]||t["addr:town"]||"";const parts=[t["addr:housenumber"],t["addr:street"]].filter(Boolean).join(" ");const address=[parts,suburb,t["addr:postcode"]].filter(Boolean).join(", ");return{id:`cafe-${el.type}-${el.id}`,name,address,suburb,postcode:t["addr:postcode"]||"",operator:t.operator||t.brand||"",layer:"cafe",lat,lon,opening_hours:t.opening_hours||"",website:t.website||t["contact:website"]||"",wheelchair:t.wheelchair||"",source:"OpenStreetMap",osm:true,osmType:el.type,osmId:el.id};}
+
+  async function refreshCafeLayer(){
+    if(!activeLayers.has("cafe"))return;const serial=++cafeRequestSerial;const c=userLocation?{lat:userLocation.lat,lng:userLocation.lon}:map.getCenter();$("layerHint").textContent="Finding coffee around this part of Naarm…";
+    const query=`[out:json][timeout:20];nwr["amenity"="cafe"](around:3000,${c.lat},${c.lng});out center tags;`;
+    try{const json=await overpass(query);if(serial!==cafeRequestSerial)return;const cafes=(json.elements||[]).map(osmToCafe).filter(Boolean);shops=shops.filter(s=>(s.layer||"opshop")!=="cafe");cafes.forEach(x=>shops.push(x));refreshFilters();syncLayerUI();render();$("layerHint").textContent=`${cafes.length} cafés around this map area · tap one to check current reviews.`;}catch(e){$("layerHint").textContent="Coffee layer couldn’t refresh just now; the other map layers are still available.";}
   }
 
   function regionFor(s){
