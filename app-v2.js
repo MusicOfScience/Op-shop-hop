@@ -49,7 +49,7 @@
 
   const $ = id => document.getElementById(id);
   const qa = sel => [...document.querySelectorAll(sel)];
-  const clone = x => JSON.parse(JSON.stringify(x));
+  function clone(x){return JSON.parse(JSON.stringify(x));}
   const normalize = s => String(s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g," ").trim();
   const esc = s => String(s ?? "").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 
