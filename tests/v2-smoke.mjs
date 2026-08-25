@@ -28,5 +28,6 @@ assert(app.includes('if(v==null||v==="")return null'),"Missing coordinates must 
 assert(app.includes("mapSearchBounds=[west,south,east,north]"),"Search-this-map must constrain the visible result area");
 assert(app.includes('data-popup-list'),"Map popups must link back to the result list");
 assert(app.includes("openAddShop"),"The missing-shop journey must remain wired");
+assert(app.includes("oldBody.cloneNode(false)"),"Each modal opening must discard stale event handlers");
 
 console.log(`V2 smoke checks passed: ${seeds.length} fallback shops, ${ids.length} unique UI ids.`);
