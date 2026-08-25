@@ -46,6 +46,8 @@
   let lastNearDiscovery = null;
   let requestSerial = 0;
   let toastTimer = null;
+  let mapSearchBounds = null;
+  let highlightedPlaceId = null;
 
   const $ = id => document.getElementById(id);
   const qa = sel => [...document.querySelectorAll(sel)];
@@ -94,7 +96,7 @@
       postcode:String(s.postcode||"").trim(),
       lat:numberOrNull(s.lat),lon:numberOrNull(s.lon),
       opening_hours:s.opening_hours||"",website:s.website||"",wheelchair:s.wheelchair||"",
-      source:s.source||"Official",official:true,osm:false
+      source:s.source||"Official",official:!s.manual,manual:!!s.manual,osm:false
     };
   }
 
@@ -125,7 +127,7 @@
     if(suburb && normalize(street)===normalize(suburb))return "";
     return street;
   }
-  function numberOrNull(v){const n=Number(v);return Number.isFinite(n)?n:null;}
+  function numberOrNull(v){if(v==null||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null;}
   function canonicalOrg(s){const n=normalize(s);if(/salvo|salvation army/.test(n))return"salvos";if(/vinn|vincent de paul/.test(n))return"vinnies";if(/red cross/.test(n))return"redcross";if(/sacred heart/.test(n))return"sacredheart";if(/save the children/.test(n))return"savethechildren";if(/helping hands/.test(n))return"helpinghands";if(/brotherhood/.test(n))return"brotherhood";if(/epilepsy/.test(n))return"epilepsy";if(/don bosco/.test(n))return"donbosco";if(/uniting/.test(n))return"uniting";return n;}
   function streetCore(s){return normalize(s).replace(/\bstreet\b/g,"st").replace(/\broad\b/g,"rd").replace(/\bavenue\b/g,"ave").replace(/\bparade\b/g,"pde");}
   function fuzzyName(a,b){const aa=normalize(a).split(" ").filter(x=>x.length>2);const bb=normalize(b);return aa.length>0&&aa.filter(x=>bb.includes(x)).length>=Math.min(2,aa.length);}
@@ -186,21 +188,27 @@
   function distanceLabel(km){return km<1?`${Math.round(km*1000)} m`:`${km<10?km.toFixed(1):Math.round(km)} km`;}
   function insideBBox(p,b){return p.lon!=null&&p.lat!=null&&p.lon>=b[0]&&p.lon<=b[2]&&p.lat>=b[1]&&p.lat<=b[3];}
   function scopeContains(p){
+    if(mapSearchBounds && p.lon!=null && p.lat!=null)return insideBBox(p,mapSearchBounds);
+    if(mapSearchBounds)return false;
     if(prefs.scope==="near")return origin&&p.lat!=null&&distanceFromOrigin(p)<=Number(prefs.radius||5);
     if(prefs.scope==="inner")return insideBBox(p,BBOX.inner)||(!p.lat&&INNER_SUBURBS.has(p.suburb));
-    if(prefs.scope==="metro")return insideBBox(p,BBOX.metro)||(!p.lat&&p.official&&!KNOWN_REGIONAL_SEED_POSTCODES.has(String(p.postcode)));
+    if(prefs.scope==="metro")return insideBBox(p,BBOX.metro)||(!p.lat&&(p.official||p.manual)&&!KNOWN_REGIONAL_SEED_POSTCODES.has(String(p.postcode)));
     return true;
   }
 
   function initMap(){
-    if(!window.maplibregl){$("scopeStatus").textContent="Map library did not load; the list is still available.";return;}
-    map=new maplibregl.Map({
-      container:"map",
-      style:{version:8,sources:{osm:{type:"raster",tiles:["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],tileSize:256,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}},layers:[{id:"osm-base",type:"raster",source:"osm"}]},
-      center:[144.9631,-37.8136],zoom:10.5,attributionControl:true
-    });
-    map.addControl(new maplibregl.NavigationControl({showCompass:false}),"top-right");
+    if(!window.maplibregl){showMapFallback("The map library did not load.");return;}
+    try{
+      map=new maplibregl.Map({
+        container:"map",
+        style:{version:8,sources:{osm:{type:"raster",tiles:["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],tileSize:256,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}},layers:[{id:"osm-base",type:"raster",source:"osm"}]},
+        center:[144.9631,-37.8136],zoom:10.5,attributionControl:true
+      });
+      map.addControl(new maplibregl.NavigationControl({showCompass:false}),"top-right");
+    }catch(e){showMapFallback("The interactive map is unavailable on this device.");return;}
+    map.on("error",e=>{if(!mapReady&&/webgl|context/i.test(String(e?.error?.message||e?.message||"")))showMapFallback("The interactive map is unavailable on this device.");});
     map.on("load",()=>{
+      if(!map)return;
       mapReady=true;
       map.addSource("places",{type:"geojson",data:emptyGeoJSON()});
       map.addLayer({id:"places-circles",type:"circle",source:"places",paint:{
@@ -216,13 +224,25 @@
       map.on("click","places-circles",e=>{
         const f=e.features?.[0];if(!f)return;const p=placeById(f.properties.id);if(!p)return;
         const a=displayAddress(p);
-        const html=`<div class="map-popup"><strong>${esc(p.name)}</strong><small>${esc(LAYER_SINGULAR[p.layer])} · ${esc(a.text)}</small><button type="button" data-popup-review="${esc(p.id)}">${p.layer==="opshop"?"Rate / note":"Save / note"}</button></div>`;
+        highlightedPlaceId=p.id;paintHighlightedCard();
+        const html=`<div class="map-popup"><strong>${esc(p.name)}</strong><small>${esc(LAYER_SINGULAR[p.layer])} · ${esc(a.text)}</small><div class="map-popup-actions"><button type="button" data-popup-list="${esc(p.id)}">Show in list</button><button type="button" data-popup-directions="${esc(p.id)}">Directions</button><button type="button" class="primary" data-popup-review="${esc(p.id)}">${p.layer==="opshop"?"Rate / note":"Save / note"}</button></div></div>`;
         const pop=new maplibregl.Popup({offset:12}).setLngLat([p.lon,p.lat]).setHTML(html).addTo(map);
-        setTimeout(()=>document.querySelector(`[data-popup-review="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>{pop.remove();openReview(p);}),0);
+        setTimeout(()=>{
+          document.querySelector(`[data-popup-list="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>focusPlaceCard(p.id,true));
+          document.querySelector(`[data-popup-directions="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>openDirections(p));
+          document.querySelector(`[data-popup-review="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>{pop.remove();openReview(p);});
+        },0);
       });
-      new ResizeObserver(()=>map?.resize()).observe($("map"));
+      if(window.ResizeObserver)new ResizeObserver(()=>map?.resize()).observe($("map"));
       updateMapData();applyScopeView();
     });
+  }
+
+  function showMapFallback(message){
+    mapReady=false;map=null;
+    const host=$("map");host.classList.add("map-fallback");host.innerHTML=`<div><strong>Map unavailable</strong><span>${esc(message)} You can still search, browse, save and plan from the list.</span></div>`;
+    $("mapCount").textContent="List mode";$("searchMapBtn").disabled=true;
+    setStatus(`${message} The list is ready.`);
   }
 
   function emptyGeoJSON(){return {type:"FeatureCollection",features:[]};}
@@ -299,7 +319,7 @@
   }
 
   async function discoverMapArea(){
-    if(!mapReady)return;
+    if(!mapReady){toast("The interactive map is unavailable");return;}
     const b=map.getBounds(),z=map.getZoom();
     const includeCafe=z>=12.2;
     const parts=localQueryParts(includeCafe).filter(x=>!x.includes('shop"="charity')&&!x.includes('second_hand')&&!x.includes('shop"="clothes')||z>=10);
@@ -307,7 +327,7 @@
     const south=b.getSouth(),west=b.getWest(),north=b.getNorth(),east=b.getEast();
     setStatus(includeCafe?"Searching this map area…":"Searching this map area · cafés load when zoomed in…");
     const body=parts.map(p=>`nwr(${south},${west},${north},${east})${p};`).join("");
-    try{const data=await overpass(`[out:json][timeout:25];(${body});out center tags;`);mergePlaces((data.elements||[]).map(osmPlace).filter(Boolean));render();setStatus(`Map area refreshed · ${filtered.length} places in this view`);}catch(e){setStatus("Map-area discovery is temporarily unavailable.");}
+    try{const data=await overpass(`[out:json][timeout:25];(${body});out center tags;`);mergePlaces((data.elements||[]).map(osmPlace).filter(Boolean));mapSearchBounds=[west,south,east,north];render();setStatus(`Map area refreshed · ${filtered.length} places in this view`);}catch(e){setStatus("Map-area discovery is temporarily unavailable; the previous results are unchanged.");}
   }
 
   function setStatus(s){$("scopeStatus").textContent=s;}
@@ -316,7 +336,7 @@
     if(!navigator.geolocation){setStatus("Location is not available in this browser.");return Promise.reject(new Error("no geolocation"));}
     if(!silent)setStatus("Finding your location…");
     return new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(async pos=>{
-      origin={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};prefs.scope="near";prefs.locationChoice="use";savePrefs();syncControls();render();await discoverNear(true);applyScopeView();resolve(origin);
+      mapSearchBounds=null;origin={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};prefs.scope="near";prefs.locationChoice="use";savePrefs();syncControls();render();await discoverNear(true);applyScopeView();resolve(origin);
     },err=>{setStatus(err.code===1?"Location is off. Search an address or browse Melbourne/Victoria.":"Couldn’t get a reliable location just now.");reject(err);},{enableHighAccuracy:true,timeout:12000,maximumAge:120000}));
   }
 
@@ -325,7 +345,7 @@
     if(!navigator.geolocation){toast("Location is not available");return;}
     followMode=true;$("followBtn").classList.add("active");$("followBtn").textContent="Stop following";
     followWatch=navigator.geolocation.watchPosition(pos=>{
-      const next={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};const moved=origin?haversine(origin.lat,origin.lon,next.lat,next.lon):99;origin=next;prefs.scope="near";prefs.locationChoice="use";savePrefs();render();if(moved>1.2)discoverNear(true);if(mapReady)map.easeTo({center:[origin.lon,origin.lat],duration:250});
+      const next={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};const moved=origin?haversine(origin.lat,origin.lon,next.lat,next.lon):99;mapSearchBounds=null;origin=next;prefs.scope="near";prefs.locationChoice="use";savePrefs();render();if(moved>1.2)discoverNear(true);if(mapReady)map.easeTo({center:[origin.lon,origin.lat],duration:250});
     },()=>{toast("Live location paused");},{enableHighAccuracy:true,maximumAge:15000,timeout:15000});
   }
 
@@ -335,7 +355,7 @@
     try{
       const res=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=au&limit=1&q=${encodeURIComponent(q+", Victoria, Australia")}`,{headers:{"Accept":"application/json"}});
       if(!res.ok)throw new Error("geocode");const items=await res.json();if(!items.length){setStatus("I couldn’t find that place in Victoria.");return;}
-      origin={lat:Number(items[0].lat),lon:Number(items[0].lon),label:q};prefs.scope="near";savePrefs();syncControls();render();await discoverNear(true);applyScopeView();
+      mapSearchBounds=null;origin={lat:Number(items[0].lat),lon:Number(items[0].lon),label:q};prefs.scope="near";savePrefs();syncControls();render();await discoverNear(true);applyScopeView();
     }catch(e){setStatus("Address search is temporarily unavailable.");}
   }
 
@@ -363,7 +383,7 @@
   function render(){
     filtered=filteredPlaces();
     renderCards();updateMapData();renderRouteTray();
-    $("resultsTitle").textContent=prefs.scope==="near"?(origin?`Near ${origin.label}`:"Near me"):SCOPE_LABEL[prefs.scope];
+    $("resultsTitle").textContent=mapSearchBounds?"This map area":prefs.scope==="near"?(origin?`Near ${origin.label}`:"Near me"):SCOPE_LABEL[prefs.scope];
     const mapped=filtered.filter(p=>p.lat!=null).length;
     $("resultsMeta").textContent=`${filtered.length} ${filtered.length===1?"place":"places"}${mapped!==filtered.length?` · ${mapped} mapped`:""} · ${prefs.layers.map(x=>LAYER_LABEL[x]).join(" + ")}`;
   }
@@ -376,18 +396,18 @@
       const distance=prefs.scope==="near"&&origin&&x.lat!=null?`<p class="place-distance">${distanceLabel(distanceFromOrigin(x))} away</p>`:"";
       const rating=x.layer==="opshop"?(avg?`<div class="card-rating"><strong>${avg.toFixed(1)}</strong>/10 · ${Object.keys(r?.ratings||{}).length} criteria</div>`:`<div class="card-rating">Not rated yet</div>`):(r?.notes?`<div class="card-rating">Saved in your field notes</div>`:`<div class="card-rating">Noted as a ${LAYER_SINGULAR[x.layer].toLowerCase()}</div>`);
       const tags=(r?.tags||[]).slice(0,5).map(t=>`<span class="tag">${tagGlyph(t)} #${esc(t)}</span>`).join("");
-      return `<article class="place-card" data-place="${esc(x.id)}"><div class="card-head"><div class="card-copy"><div class="place-type">${LAYER_GLYPH[x.layer]} ${esc(LAYER_SINGULAR[x.layer])}</div><h3 class="place-name">${esc(x.name)}</h3><p class="place-address ${addr.missing?"missing":""}">${esc(addr.text)}</p>${distance}</div><button class="fav ${fav?"on":""}" data-action="fav" data-id="${esc(x.id)}" aria-label="Love this place">${fav?"♥":"♡"}</button></div>${rating}<div class="tags">${tags}</div><div class="card-actions"><button class="primary" data-action="review" data-id="${esc(x.id)}">${x.layer==="opshop"?"Rate / note":"Save / note"}</button><button data-action="directions" data-id="${esc(x.id)}">Directions</button><div class="more-wrap"><button class="icon" data-action="more" data-id="${esc(x.id)}" aria-label="More actions">•••</button><div class="more-menu hidden" data-menu="${esc(x.id)}"><button data-action="hop" data-id="${esc(x.id)}">${inHop?"✓ Remove from hop":"＋ Add to hop"}</button><button data-action="around" data-id="${esc(x.id)}">Around here</button><button data-action="status-want" data-id="${esc(x.id)}">${r?.status==="want"?"✓ ":""}Want to go</button><button data-action="status-visited" data-id="${esc(x.id)}">${r?.status==="visited"?"✓ ":""}Visited</button></div></div></div></article>`;
+      return `<article class="place-card ${highlightedPlaceId===x.id?"highlighted":""}" data-place="${esc(x.id)}"><div class="card-head"><div class="card-copy"><div class="place-type">${LAYER_GLYPH[x.layer]} ${esc(LAYER_SINGULAR[x.layer])}</div><h3 class="place-name">${esc(x.name)}</h3><p class="place-address ${addr.missing?"missing":""}">${esc(addr.text)}</p>${distance}</div><button class="fav ${fav?"on":""}" data-action="fav" data-id="${esc(x.id)}" aria-label="${fav?"Remove from loved places":"Add to loved places"}" aria-pressed="${fav}">${fav?"♥":"♡"}</button></div>${rating}<div class="tags">${tags}</div><div class="card-actions"><button class="primary" data-action="review" data-id="${esc(x.id)}">${x.layer==="opshop"?"Rate / note":"Save / note"}</button><button data-action="directions" data-id="${esc(x.id)}">Directions</button><div class="more-wrap"><button class="icon" data-action="more" data-id="${esc(x.id)}" aria-label="More actions" aria-expanded="false">•••</button><div class="more-menu hidden" data-menu="${esc(x.id)}"><button data-action="map" data-id="${esc(x.id)}">Show on map</button><button data-action="hop" data-id="${esc(x.id)}">${inHop?"✓ Remove from hop":"＋ Add to hop"}</button><button data-action="around" data-id="${esc(x.id)}">Around here</button><button data-action="status-want" data-id="${esc(x.id)}">${r?.status==="want"?"✓ ":""}Want to go</button><button data-action="status-visited" data-id="${esc(x.id)}">${r?.status==="visited"?"✓ ":""}Visited</button></div></div></div></article>`;
     }).join("");
   }
 
   function tagGlyph(tag){const n=normalize(tag);if(/book|read/.test(n))return"▤";if(/record|vinyl|music/.test(n))return"◉";if(/coffee|cafe/.test(n))return"☕";if(/cloth|fashion/.test(n))return"✂";if(/art|craft/.test(n))return"✦";if(/cheap|value|bargain/.test(n))return"$";return"•";}
 
   function syncControls(){
-    qa("[data-scope]").forEach(b=>b.classList.toggle("active",b.dataset.scope===prefs.scope));
+    qa("[data-scope]").forEach(b=>{const active=!mapSearchBounds&&b.dataset.scope===prefs.scope;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});
     qa("[data-layer]").forEach(el=>{const on=prefs.layers.includes(el.dataset.layer);el.classList.toggle("active",on);const cb=el.querySelector("input");if(cb)cb.checked=on;});
-    qa("[data-saved]").forEach(b=>b.classList.toggle("active",b.dataset.saved===prefs.saved));
+    qa("[data-saved]").forEach(b=>{const active=b.dataset.saved===prefs.saved;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});
     $("radiusWrap").classList.toggle("hidden",prefs.scope!=="near");$("radiusSelect").value=String(prefs.radius);
-    document.body.classList.toggle("map-hidden",!!prefs.mapHidden);$("mapToggleBtn").textContent=prefs.mapHidden?"Show map":"Hide map";
+    document.body.classList.toggle("map-hidden",!!prefs.mapHidden);$("mapToggleBtn").textContent=prefs.mapHidden?"Show map":"Hide map";$("mapToggleBtn").setAttribute("aria-pressed",String(!prefs.mapHidden));
     if(origin){$("originLabel").textContent=prefs.scope==="near"?"Near me":"Location ready";$("originSub").textContent=origin.label==="your location"?"Using your current location":`Starting near ${origin.label}`;}
     else{$("originLabel").textContent="Choose a starting point";$("originSub").textContent=prefs.locationChoice==="browse"?"Browsing without location":"Use your location or search an address";}
     renderSortOptions();
@@ -404,7 +424,7 @@
     if(scope==="near"&&!origin){
       $("locationPrompt").showModal();return;
     }
-    prefs.scope=scope;if(scope==="near")prefs.sort="distance";else if(prefs.sort.startsWith("distance"))prefs.sort="suburb";savePrefs();syncControls();render();applyScopeView();
+    mapSearchBounds=null;prefs.scope=scope;if(scope==="near")prefs.sort="distance";else if(prefs.sort.startsWith("distance"))prefs.sort="suburb";savePrefs();syncControls();render();applyScopeView();
     if(scope==="near")await discoverNear(false);
     else if((prefs.layers.includes("books")||prefs.layers.includes("records"))&&scope!=="vic")setStatus("Overview mode · use Search this map to refresh books/records; zoom in for cafés.");
   }
@@ -433,7 +453,7 @@
       if(e.target.id==="addTagBtn"){const inp=$("reviewTagInput");const t=cleanTag(inp.value);if(t&&!draft.tags.includes(t))draft.tags.push(t);inp.value="";renderReviewBody(place,draft,cats,op);return;}
       const lib=e.target.closest("[data-tag-lib]");if(lib){const t=lib.dataset.tagLib;if(!draft.tags.includes(t))draft.tags.push(t);renderReviewBody(place,draft,cats,op);return;}
       const rm=e.target.closest("[data-remove-tag]");if(rm){draft.tags=draft.tags.filter(t=>t!==rm.dataset.removeTag);renderReviewBody(place,draft,cats,op);return;}
-      if(e.target.id==="saveReview"){draft.notes=$("reviewNotes")?.value||draft.notes||"";draft.updatedAt=new Date().toISOString();p.reviews[place.id]=draft;saveProfiles();$("modal").close();render();toast("Saved");return;}
+      if(e.target.id==="saveReview"){const notes=$("reviewNotes");draft.notes=notes?notes.value:(draft.notes||"");draft.updatedAt=new Date().toISOString();p.reviews[place.id]=draft;saveProfiles();$("modal").close();render();toast("Saved");return;}
       if(e.target.id==="currentReviews"&&place.lat!=null)window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name+" "+place.lat+","+place.lon)}`,"_blank","noopener");
     });
     $("modal").showModal();
@@ -453,17 +473,41 @@
   function cleanTag(s){return normalize(s).replace(/\s+/g,"-");}
   function tagLibrary(){const set=new Set();Object.values(profile().reviews||{}).forEach(r=>(r.tags||[]).forEach(t=>set.add(t)));return [...set].sort();}
 
-  function openDirections(p){const dest=p.lat!=null?`${p.lat},${p.lon}`:[p.street,p.suburb,p.postcode].filter(Boolean).join(" ");const enc=encodeURIComponent(dest||p.name);setModal(`Directions · ${p.name}`,()=>`<p class="dialog-copy">${esc(displayAddress(p).text)}</p><div class="dialog-actions" style="justify-content:flex-start"><a target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${enc}"><button type="button" class="primary">Google Maps</button></a><a target="_blank" rel="noopener" href="https://maps.apple.com/?daddr=${enc}"><button type="button">Apple Maps</button></a>${p.lat!=null?`<a target="_blank" rel="noopener" href="https://www.waze.com/ul?ll=${p.lat}%2C${p.lon}&navigate=yes"><button type="button">Waze</button></a>`:""}</div>${p.lat!=null?`<p class="dialog-copy">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</p>`:""}`);$("modal").showModal();}
+  function openDirections(p){const dest=p.lat!=null?`${p.lat},${p.lon}`:[p.street,p.suburb,p.postcode].filter(Boolean).join(" ");const enc=encodeURIComponent(dest||p.name);setModal(`Directions · ${p.name}`,()=>`<p class="dialog-copy">${esc(displayAddress(p).text)}</p><div class="dialog-actions" style="justify-content:flex-start"><a class="button-link primary" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${enc}">Google Maps</a><a class="button-link" target="_blank" rel="noopener" href="https://maps.apple.com/?daddr=${enc}">Apple Maps</a>${p.lat!=null?`<a class="button-link" target="_blank" rel="noopener" href="https://www.waze.com/ul?ll=${p.lat}%2C${p.lon}&navigate=yes">Waze</a>`:""}</div>${p.lat!=null?`<p class="dialog-copy">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</p>`:""}`);$("modal").showModal();}
 
   async function openAround(p){
     if(p.lat==null){toast("This place needs map coordinates first");return;}
     setModal(`Around ${p.suburb||p.name}`,()=>'<p class="dialog-copy">Looking for cafés, books and records within walking distance…</p>');$("modal").showModal();
     const q=`[out:json][timeout:20];(nwr(around:1400,${p.lat},${p.lon})["amenity"="cafe"];nwr(around:1400,${p.lat},${p.lon})["shop"="books"];nwr(around:1400,${p.lat},${p.lon})["shop"="music"];);out center tags;`;
-    try{const data=await overpass(q);const items=(data.elements||[]).map(osmPlace).filter(Boolean).sort((a,b)=>haversine(p.lat,p.lon,a.lat,a.lon)-haversine(p.lat,p.lon,b.lat,b.lon)).slice(0,18);$("modalBody").innerHTML=items.length?items.map(x=>`<div style="padding:.6rem 0;border-bottom:1px solid var(--line)"><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(LAYER_SINGULAR[x.layer])} · ${Math.round(haversine(p.lat,p.lon,x.lat,x.lon)*1000)} m</div><div style="margin-top:.3rem"><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.name+" "+x.lat+","+x.lon)}"><button type="button">Reviews / map</button></a></div></div>`).join(""):'<p>No mapped side quests found nearby.</p>'; }catch(e){$("modalBody").innerHTML='<p>Nearby discovery is temporarily unavailable.</p>';}
+    try{const data=await overpass(q);const items=(data.elements||[]).map(osmPlace).filter(Boolean).sort((a,b)=>haversine(p.lat,p.lon,a.lat,a.lon)-haversine(p.lat,p.lon,b.lat,b.lon)).slice(0,18);$("modalBody").innerHTML=items.length?items.map(x=>`<div style="padding:.6rem 0;border-bottom:1px solid var(--line)"><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(LAYER_SINGULAR[x.layer])} · ${Math.round(haversine(p.lat,p.lon,x.lat,x.lon)*1000)} m</div><div style="margin-top:.3rem"><a class="button-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.name+" "+x.lat+","+x.lon)}">Reviews / map</a></div></div>`).join(""):'<p>No mapped side quests found nearby.</p>'; }catch(e){$("modalBody").innerHTML='<p>Nearby discovery is temporarily unavailable.</p>';}
   }
 
-  function openRoute(){const ps=[...routeIds].map(placeById).filter(p=>p?.lat!=null);if(ps.length<2)return;const ordered=nearestNeighbour(ps,origin);const start=origin?`${origin.lat},${origin.lon}`:`${ordered[0].lat},${ordered[0].lon}`;const dest=`${ordered.at(-1).lat},${ordered.at(-1).lon}`;const wp=ordered.slice(0,-1).map(x=>`${x.lat},${x.lon}`).join("|");const url=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(start)}&destination=${encodeURIComponent(dest)}&travelmode=walking${wp?`&waypoints=${encodeURIComponent(wp)}`:""}`;setModal("Your hop",()=>`<ol>${ordered.map(x=>`<li><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(displayAddress(x).text)}</div></li>`).join("")}</ol><div class="dialog-actions" style="justify-content:flex-start"><a target="_blank" rel="noopener" href="${url}"><button type="button" class="primary">Open walking route</button></a></div><p class="dialog-copy">Approximate stop order; your mapping app handles the street-by-street route.</p>`);$("modal").showModal();}
+  function openRoute(){const ps=[...routeIds].map(placeById).filter(p=>p?.lat!=null);if(ps.length<2)return;const ordered=nearestNeighbour(ps,origin);const start=origin?`${origin.lat},${origin.lon}`:`${ordered[0].lat},${ordered[0].lon}`;const dest=`${ordered.at(-1).lat},${ordered.at(-1).lon}`;const wp=ordered.slice(0,-1).map(x=>`${x.lat},${x.lon}`).join("|");const url=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(start)}&destination=${encodeURIComponent(dest)}&travelmode=walking${wp?`&waypoints=${encodeURIComponent(wp)}`:""}`;setModal("Your hop",()=>`<ol>${ordered.map(x=>`<li><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(displayAddress(x).text)}</div></li>`).join("")}</ol><div class="dialog-actions" style="justify-content:flex-start"><a class="button-link primary" target="_blank" rel="noopener" href="${url}">Open walking route</a></div><p class="dialog-copy">Approximate stop order; your mapping app handles the street-by-street route.</p>`);$("modal").showModal();}
   function nearestNeighbour(arr,start){const left=[...arr],out=[];let cur=start||left.shift();if(!start)out.push(cur);while(left.length){left.sort((a,b)=>haversine(cur.lat,cur.lon,a.lat,a.lon)-haversine(cur.lat,cur.lon,b.lat,b.lon));cur=left.shift();out.push(cur);}return out;}
+
+  function focusPlaceCard(id,scroll=false){
+    highlightedPlaceId=id;paintHighlightedCard();
+    const card=document.querySelector(`[data-place="${cssEscape(id)}"]`);
+    if(scroll&&card)card.scrollIntoView({behavior:"smooth",block:"center"});
+  }
+  function paintHighlightedCard(){qa("[data-place]").forEach(card=>card.classList.toggle("highlighted",card.dataset.place===highlightedPlaceId));}
+  function showOnMap(place){
+    if(!mapReady||place.lat==null){toast(place.lat==null?"This place needs map coordinates first":"The interactive map is unavailable");return;}
+    prefs.mapHidden=false;savePrefs();syncControls();map.flyTo({center:[place.lon,place.lat],zoom:15});focusPlaceCard(place.id,false);$("map").scrollIntoView({behavior:"smooth",block:"center"});
+  }
+
+  function openAddShop(){
+    setModal("Add a missing op shop",()=>`<p class="dialog-copy">Add a place to this hopper profile. It stays on this device and is included in your exported backup.</p><label class="field">Shop name<input id="manualName" autocomplete="organization" required></label><label class="field">Street address<input id="manualStreet" autocomplete="street-address"></label><div class="inline-fields"><label class="field">Suburb<input id="manualSuburb" autocomplete="address-level2" required></label><label class="field">Postcode<input id="manualPostcode" inputmode="numeric" maxlength="4" autocomplete="postal-code"></label></div><label class="field">Website (optional)<input id="manualWebsite" type="url" inputmode="url" placeholder="https://"></label><div class="dialog-actions"><button type="button" id="saveManualShop" class="primary">Add shop</button></div>`);
+    $("modalBody").addEventListener("click",e=>{if(e.target.id==="saveManualShop")saveManualShop();});
+    $("modal").showModal();setTimeout(()=>$("manualName")?.focus(),0);
+  }
+  function saveManualShop(){
+    const name=$("manualName").value.trim(),street=$("manualStreet").value.trim(),suburb=$("manualSuburb").value.trim(),postcode=$("manualPostcode").value.trim(),website=$("manualWebsite").value.trim();
+    if(!name||!suburb){toast("Add a shop name and suburb");return;}
+    if(postcode&&!/^3\d{3}$/.test(postcode)){toast("Use a four-digit Victorian postcode");return;}
+    const entry={id:`manual-${Date.now()}`,name,address:[street,suburb,postcode].filter(Boolean).join(", "),suburb,postcode,operator:"",source:"Added by you",manual:true,website};
+    const p=profile();p.manualShops ||= [];p.manualShops.push(entry);saveProfiles();places.push(canonicalSeed(entry));mapSearchBounds=null;$("modal").close();syncControls();render();toast("Shop added");
+  }
 
   function openSettings(){
     const p=profile();const rows=(p.categories||DEFAULT_CATEGORIES).map((c,i)=>`<div class="category-row" data-cat="${i}"><input value="${esc(c.name)}" aria-label="Category name"><select><option value="always" ${c.mode==="always"?"selected":""}>Always</option><option value="adhoc" ${c.mode==="adhoc"?"selected":""}>Ad hoc</option><option value="hidden" ${c.mode==="hidden"?"selected":""}>Hidden</option></select><button type="button" data-delete-cat="${i}">×</button></div>`).join("");
@@ -487,9 +531,9 @@
   function handleListClick(e){
     const b=e.target.closest("[data-action]");if(!b)return;const id=b.dataset.id,p=placeById(id);if(!p)return;
     const action=b.dataset.action;
-    if(action==="more"){const menu=document.querySelector(`[data-menu="${cssEscape(id)}"]`);qa(".more-menu").forEach(m=>{if(m!==menu)m.classList.add("hidden")});menu?.classList.toggle("hidden");return;}
+    if(action==="more"){const menu=document.querySelector(`[data-menu="${cssEscape(id)}"]`);qa(".more-menu").forEach(m=>{if(m!==menu)m.classList.add("hidden")});menu?.classList.toggle("hidden");b.setAttribute("aria-expanded",String(!menu?.classList.contains("hidden")));return;}
     qa(".more-menu").forEach(m=>m.classList.add("hidden"));
-    if(action==="fav")toggleFavourite(id);if(action==="review")openReview(p);if(action==="directions")openDirections(p);if(action==="hop")toggleHop(id);if(action==="around")openAround(p);if(action==="status-want")setQuickStatus(id,"want");if(action==="status-visited")setQuickStatus(id,"visited");
+    if(action==="fav")toggleFavourite(id);if(action==="review")openReview(p);if(action==="directions")openDirections(p);if(action==="map")showOnMap(p);if(action==="hop")toggleHop(id);if(action==="around")openAround(p);if(action==="status-want")setQuickStatus(id,"want");if(action==="status-visited")setQuickStatus(id,"visited");
   }
 
   function wireUI(){
@@ -500,6 +544,7 @@
     $("radiusSelect").addEventListener("change",()=>{prefs.radius=Number($("radiusSelect").value);savePrefs();render();discoverNear(true);applyScopeView();});
     $("sortSelect").addEventListener("change",()=>{prefs.sort=$("sortSelect").value;savePrefs();render();});
     $("placeSearch").addEventListener("input",render);
+    $("clearPlaceSearch").addEventListener("click",()=>{$("placeSearch").value="";render();$("placeSearch").focus();});
     $("locationSearchBtn").addEventListener("click",geocodeSearch);$("locationSearch").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();geocodeSearch();}});
     $("useLocationBtn").addEventListener("click",()=>requestLocation().catch(()=>{}));$("followBtn").addEventListener("click",startFollow);
     $("mapToggleBtn").addEventListener("click",()=>{prefs.mapHidden=!prefs.mapHidden;savePrefs();syncControls();setTimeout(()=>map?.resize(),50);});
@@ -507,6 +552,7 @@
     $("placeList").addEventListener("click",handleListClick);
     $("clearRouteBtn").addEventListener("click",()=>{routeIds.clear();render();});$("planRouteBtn").addEventListener("click",openRoute);
     $("settingsBtn").addEventListener("click",openSettings);$("newProfileBtn").addEventListener("click",newProfile);$("profileSelect").addEventListener("change",e=>{state.activeProfileId=e.target.value;saveProfiles();routeIds.clear();render();});
+    $("addShopBtn").addEventListener("click",openAddShop);
     $("allowLocationBtn").addEventListener("click",()=>{$("locationPrompt").close();prefs.locationChoice="use";savePrefs();requestLocation().catch(()=>{prefs.scope="metro";savePrefs();syncControls();render();applyScopeView();});});
     $("browseWithoutBtn").addEventListener("click",()=>{$("locationPrompt").close();prefs.locationChoice="browse";prefs.scope="metro";prefs.sort="suburb";savePrefs();syncControls();render();applyScopeView();setStatus("Browsing Melbourne · search an address or use location any time.");});
     $("modalClose").addEventListener("click",()=>$("modal").close());$("modal").addEventListener("click",e=>{if(e.target===$("modal"))$("modal").close();});
@@ -515,7 +561,7 @@
 
   async function init(){
     profile().manualShops?.forEach(s=>{if(!places.some(p=>p.id===s.id))places.push(canonicalSeed({...s,layer:"opshop"}));});
-    wireUI();renderProfileSelect();syncControls();initMap();render();
+    wireUI();renderProfileSelect();syncControls();render();initMap();
     refreshVictoriaBase(false);
     if(prefs.locationChoice==="use"){
       requestLocation({silent:true}).catch(()=>{if(!origin){prefs.scope="metro";savePrefs();syncControls();render();applyScopeView();}});
