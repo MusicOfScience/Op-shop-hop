@@ -67,7 +67,7 @@
             <option value="25">25 km</option>
           </select>
         </label>
-        <span id="scopeStatus" class="scope-status">Loading field guide…</span>
+        <span id="scopeStatus" class="scope-status" role="status" aria-live="polite">Loading field guide…</span>
       </div>
     </section>
 
@@ -107,6 +107,7 @@
             <div id="resultsMeta" class="result-meta">0 places</div>
           </div>
           <div class="results-actions">
+            <button id="addShopBtn" type="button">＋ Add shop</button>
             <select id="sortSelect" aria-label="Sort results"></select>
           </div>
         </div>
@@ -120,7 +121,7 @@
 
         <div class="location-search" style="margin:.15rem 0 .55rem">
           <input id="placeSearch" type="search" placeholder="Search these places, suburb or #tag" autocomplete="off" aria-label="Search results">
-          <button type="button" onclick="document.getElementById('placeSearch').value='';document.getElementById('placeSearch').dispatchEvent(new Event('input'))">Clear</button>
+          <button id="clearPlaceSearch" type="button">Clear</button>
         </div>
 
         <section id="placeList" class="place-list" aria-live="polite"></section>
