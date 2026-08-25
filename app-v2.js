@@ -444,6 +444,7 @@
     const op=place.layer==="opshop";const cats=(p.categories||DEFAULT_CATEGORIES).filter(c=>c.mode!=="hidden");
     setModal(`${LAYER_GLYPH[place.layer]} ${place.name}`,()=>reviewHTML(place,draft,cats,op));
     const body=$("modalBody");
+    body.addEventListener("input",e=>{if(e.target.id==="reviewNotes")draft.notes=e.target.value;});
     body.addEventListener("click",e=>{
       const rate=e.target.closest("[data-rate]");if(rate){const id=rate.dataset.rate,val=Number(rate.dataset.value);draft.ratings[id]=val;paintRating(body,id,val);return;}
       const customRate=e.target.closest("[data-custom-rate]");if(customRate){const idx=Number(customRate.dataset.customRate),val=Number(customRate.dataset.value);draft.customRatings[idx].value=val;renderReviewBody(place,draft,cats,op);return;}
@@ -453,7 +454,7 @@
       if(e.target.id==="addTagBtn"){const inp=$("reviewTagInput");const t=cleanTag(inp.value);if(t&&!draft.tags.includes(t))draft.tags.push(t);inp.value="";renderReviewBody(place,draft,cats,op);return;}
       const lib=e.target.closest("[data-tag-lib]");if(lib){const t=lib.dataset.tagLib;if(!draft.tags.includes(t))draft.tags.push(t);renderReviewBody(place,draft,cats,op);return;}
       const rm=e.target.closest("[data-remove-tag]");if(rm){draft.tags=draft.tags.filter(t=>t!==rm.dataset.removeTag);renderReviewBody(place,draft,cats,op);return;}
-      if(e.target.id==="saveReview"){const notes=$("reviewNotes");draft.notes=notes?notes.value:(draft.notes||"");draft.updatedAt=new Date().toISOString();p.reviews[place.id]=draft;saveProfiles();$("modal").close();render();toast("Saved");return;}
+      if(e.target.id==="saveReview"){draft.notes=$("reviewNotes")?.value??draft.notes??"";draft.updatedAt=new Date().toISOString();p.reviews[place.id]=draft;saveProfiles();$("modal").close();render();toast("Saved");return;}
       if(e.target.id==="currentReviews"&&place.lat!=null)window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.name+" "+place.lat+","+place.lon)}`,"_blank","noopener");
     });
     $("modal").showModal();
@@ -525,7 +526,10 @@
   function newProfile(){const name=prompt("Name this hopper profile");if(!name?.trim())return;const id=crypto.randomUUID?crypto.randomUUID():`p-${Date.now()}`;state.profiles[id]={id,name:name.trim(),categories:clone(DEFAULT_CATEGORIES),reviews:{},favourites:[],manualShops:[],createdAt:new Date().toISOString()};state.activeProfileId=id;saveProfiles();renderProfileSelect();render();}
   function renderProfileSelect(){$("profileSelect").innerHTML=Object.values(state.profiles).map(p=>`<option value="${esc(p.id)}" ${p.id===state.activeProfileId?"selected":""}>${esc(p.name)}</option>`).join("");}
 
-  function setModal(title,bodyFn){$("modalTitle").textContent=title;$("modalBody").innerHTML=bodyFn();}
+  function setModal(title,bodyFn){
+    $("modalTitle").textContent=title;
+    const oldBody=$("modalBody"),body=oldBody.cloneNode(false);oldBody.replaceWith(body);body.innerHTML=bodyFn();
+  }
   function toast(msg){const el=$("toast");el.textContent=msg;el.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove("show"),1800);}
 
   function handleListClick(e){
