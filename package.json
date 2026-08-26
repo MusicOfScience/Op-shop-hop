@@ -1,0 +1,13 @@
+{
+  "name": "op-shop-hop",
+  "version": "2.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/v2-smoke.mjs",
+    "test:e2e": "node tests/v2-e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

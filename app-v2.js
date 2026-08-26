@@ -5,6 +5,7 @@
   const PREF_KEY = "op-shop-hop-v2-prefs";
   const VIC_CACHE_KEY = "op-shop-hop-v2-vic-cache-v1";
   const LEGACY_LAYER_KEY = "op-shop-hop-layers-v1";
+  const VIC_CACHE_TTL = 7 * 86400000;
 
   const DEFAULT_CATEGORIES = [
     {id:"clothes",name:"Clothes",mode:"always"},
@@ -48,6 +49,7 @@
   let toastTimer = null;
   let mapSearchBounds = null;
   let highlightedPlaceId = null;
+  let dataSnapshot = {savedAt:null,count:0,mode:"curated"};
 
   const $ = id => document.getElementById(id);
   const qa = sel => [...document.querySelectorAll(sel)];
@@ -60,17 +62,17 @@
       const x = JSON.parse(localStorage.getItem(PROFILE_KEY));
       if(x?.profiles && x?.activeProfileId){
         Object.values(x.profiles).forEach(p=>{
-          p.categories ||= clone(DEFAULT_CATEGORIES); p.reviews ||= {}; p.favourites ||= []; p.manualShops ||= [];
+          p.categories ||= clone(DEFAULT_CATEGORIES); p.reviews ||= {}; p.favourites ||= []; p.manualShops ||= []; p.savedHops ||= [];
         });
         return x;
       }
     }catch(e){}
     const id = crypto.randomUUID ? crypto.randomUUID() : `p-${Date.now()}`;
-    return {activeProfileId:id,profiles:{[id]:{id,name:"Guest",categories:clone(DEFAULT_CATEGORIES),reviews:{},favourites:[],manualShops:[],createdAt:new Date().toISOString()}}};
+    return {activeProfileId:id,profiles:{[id]:{id,name:"Guest",categories:clone(DEFAULT_CATEGORIES),reviews:{},favourites:[],manualShops:[],savedHops:[],createdAt:new Date().toISOString()}}};
   }
 
   function loadPrefs(){
-    let p={scope:"metro",radius:5,saved:"all",mapHidden:false,locationChoice:null,sort:"distance"};
+    let p={scope:"metro",radius:5,saved:"all",detailFilter:"all",mapHidden:false,locationChoice:null,sort:"distance"};
     try{Object.assign(p,JSON.parse(localStorage.getItem(PREF_KEY))||{});}catch(e){}
     if(!Array.isArray(p.layers) || !p.layers.length){
       try{const old=JSON.parse(localStorage.getItem(LEGACY_LAYER_KEY));if(Array.isArray(old)&&old.length)p.layers=old.filter(x=>LAYERS.includes(x));}catch(e){}
@@ -96,7 +98,8 @@
       postcode:String(s.postcode||"").trim(),
       lat:numberOrNull(s.lat),lon:numberOrNull(s.lon),
       opening_hours:s.opening_hours||"",website:s.website||"",wheelchair:s.wheelchair||"",
-      source:s.source||"Official",official:!s.manual,manual:!!s.manual,osm:false
+      source:s.source||"Curated list",official:!s.manual,manual:!!s.manual,osm:!!s.osm,
+      checkedAt:numberOrNull(s.checkedAt),addedAt:s.addedAt||""
     };
   }
 
@@ -148,7 +151,7 @@
     if(!rawName||/^(bookshop|second[ -]?hand shop|charity shop|op shop|cafe)$/i.test(rawName))return null;
     const suburb=t["addr:suburb"]||t["addr:place"]||t["addr:city"]||t["addr:town"]||t["addr:village"]||t["is_in:suburb"]||"";
     const street=[t["addr:housenumber"],t["addr:street"]].filter(Boolean).join(" ").trim();
-    return {id:`osm-${el.type}-${el.id}`,name:cleanOSMName(rawName,suburb),rawName,operator:t.operator||t.brand||"",layer:classifyTags(t,rawName),street,suburb,postcode:t["addr:postcode"]||"",lat:Number(lat),lon:Number(lon),opening_hours:t.opening_hours||"",website:t.website||t["contact:website"]||"",wheelchair:t.wheelchair||"",source:"OpenStreetMap",official:false,osm:true};
+    return {id:`osm-${el.type}-${el.id}`,name:cleanOSMName(rawName,suburb),rawName,operator:t.operator||t.brand||"",layer:classifyTags(t,rawName),street,suburb,postcode:t["addr:postcode"]||"",lat:Number(lat),lon:Number(lon),opening_hours:t.opening_hours||"",website:t.website||t["contact:website"]||"",wheelchair:t.wheelchair||"",source:"OpenStreetMap",official:false,osm:true,checkedAt:Date.now()};
   }
 
   function mergePlaces(incoming){
@@ -171,6 +174,7 @@
         if(!match.website&&o.website)match.website=o.website;
         if(!match.wheelchair&&o.wheelchair)match.wheelchair=o.wheelchair;
         match.osm=match.osm||o.osm;
+        if(o.checkedAt)match.checkedAt=Math.max(Number(match.checkedAt||0),Number(o.checkedAt));
       }else places.push(o);
     });
   }
@@ -181,6 +185,35 @@
     if(p.street)return {text:unique.join(" · "),missing:false};
     if(p.suburb)return {text:`${[p.suburb,p.postcode].filter(Boolean).join(" · ")} · address not listed`,missing:true};
     return {text:"Address not listed",missing:true};
+  }
+
+  function sourceLabel(p){
+    if(p.manual)return "Added by you";
+    if(p.official&&p.osm)return "Curated + open map";
+    if(p.official)return "Curated starting list";
+    return "OpenStreetMap";
+  }
+  function sourceNote(p){
+    if(p.manual)return "This listing belongs to your current hopper profile and is included in exported backups.";
+    if(p.official&&p.osm)return "A curated listing enriched with current public OpenStreetMap details. Confirm hours before making a special trip.";
+    if(p.official)return "Part of the app’s curated starting list. Live map data may add coordinates, hours and web details when available.";
+    return "Discovered from community-maintained OpenStreetMap data. Details can change, so confirm important information with the venue.";
+  }
+  function safeUrl(value){
+    if(!value)return "";
+    try{const u=new URL(/^https?:\/\//i.test(value)?value:`https://${value}`);return /^https?:$/.test(u.protocol)?u.href:"";}catch(e){return "";}
+  }
+  function dateLabel(value){
+    if(!value)return "Not recorded";
+    const d=new Date(Number(value)||value);if(Number.isNaN(d.getTime()))return "Not recorded";
+    const days=Math.floor((Date.now()-d.getTime())/86400000);if(days<=0)return "Today";if(days===1)return "Yesterday";if(days<14)return `${days} days ago`;
+    return d.toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"});
+  }
+  function accessLabel(value){const n=normalize(value);if(n==="yes")return "Wheelchair accessible";if(n==="limited")return "Limited wheelchair access";if(n==="no")return "Not marked wheelchair accessible";return value?`Access: ${value}`:"Not listed";}
+  function renderDataStatus(){
+    const el=$("dataFreshness");if(!el)return;
+    if(dataSnapshot.savedAt)el.textContent=`Open-map listings updated ${dateLabel(dataSnapshot.savedAt).toLowerCase()} · ${dataSnapshot.count} records cached`;
+    else el.textContent="Curated list ready · live map update pending";
   }
 
   function haversine(aLat,aLon,bLat,bLon){const R=6371,dLat=(bLat-aLat)*Math.PI/180,dLon=(bLon-aLon)*Math.PI/180;const a=Math.sin(dLat/2)**2+Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(a));}
@@ -225,10 +258,11 @@
         const f=e.features?.[0];if(!f)return;const p=placeById(f.properties.id);if(!p)return;
         const a=displayAddress(p);
         highlightedPlaceId=p.id;paintHighlightedCard();
-        const html=`<div class="map-popup"><strong>${esc(p.name)}</strong><small>${esc(LAYER_SINGULAR[p.layer])} · ${esc(a.text)}</small><div class="map-popup-actions"><button type="button" data-popup-list="${esc(p.id)}">Show in list</button><button type="button" data-popup-directions="${esc(p.id)}">Directions</button><button type="button" class="primary" data-popup-review="${esc(p.id)}">${p.layer==="opshop"?"Rate / note":"Save / note"}</button></div></div>`;
+        const html=`<div class="map-popup"><strong>${esc(p.name)}</strong><small>${esc(LAYER_SINGULAR[p.layer])} · ${esc(a.text)}</small><div class="map-popup-actions"><button type="button" class="primary" data-popup-details="${esc(p.id)}">Details</button><button type="button" data-popup-list="${esc(p.id)}">Show in list</button><button type="button" data-popup-directions="${esc(p.id)}">Directions</button><button type="button" data-popup-review="${esc(p.id)}">${p.layer==="opshop"?"Rate / note":"Save / note"}</button></div></div>`;
         const pop=new maplibregl.Popup({offset:12}).setLngLat([p.lon,p.lat]).setHTML(html).addTo(map);
         setTimeout(()=>{
           document.querySelector(`[data-popup-list="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>focusPlaceCard(p.id,true));
+          document.querySelector(`[data-popup-details="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>{pop.remove();openDetails(p);});
           document.querySelector(`[data-popup-directions="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>openDirections(p));
           document.querySelector(`[data-popup-review="${cssEscape(p.id)}"]`)?.addEventListener("click",()=>{pop.remove();openReview(p);});
         },0);
@@ -286,14 +320,20 @@
 
   async function refreshVictoriaBase(force=false){
     if(!force){
-      try{const c=JSON.parse(localStorage.getItem(VIC_CACHE_KEY));if(c?.savedAt&&Date.now()-c.savedAt<86400000&&Array.isArray(c.places)){mergePlaces(c.places);render();return;}}catch(e){}
+      try{const c=JSON.parse(localStorage.getItem(VIC_CACHE_KEY));if(c?.savedAt&&Date.now()-c.savedAt<VIC_CACHE_TTL&&Array.isArray(c.places)){dataSnapshot={savedAt:c.savedAt,count:c.places.length,mode:"cache"};mergePlaces(c.places);render();renderDataStatus();setStatus(`Using open-map listings updated ${dateLabel(c.savedAt).toLowerCase()}`);return;}}catch(e){}
     }
     setStatus("Refreshing Victoria’s op-shop and second-hand map…");
     const q='[out:json][timeout:50];area["ISO3166-2"="AU-VIC"]["boundary"="administrative"]->.vic;(nwr["shop"="charity"](area.vic);nwr["shop"="second_hand"](area.vic);nwr["shop"="clothes"]["second_hand"~"^(yes|only)$"](area.vic););out center tags;';
     try{
-      const data=await overpass(q);const parsed=(data.elements||[]).map(osmPlace).filter(Boolean);
-      localStorage.setItem(VIC_CACHE_KEY,JSON.stringify({savedAt:Date.now(),places:parsed}));mergePlaces(parsed);render();setStatus(`Victoria refreshed · ${parsed.length} mapped second-hand places`);
+      const data=await overpass(q);const parsed=(data.elements||[]).map(osmPlace).filter(Boolean);const savedAt=Date.now();
+      localStorage.setItem(VIC_CACHE_KEY,JSON.stringify({savedAt,places:parsed}));dataSnapshot={savedAt,count:parsed.length,mode:"live"};mergePlaces(parsed);render();renderDataStatus();setStatus(`Victoria refreshed · ${parsed.length} mapped second-hand places`);
     }catch(e){setStatus("Using saved/official shop data; the Victoria refresh is temporarily unavailable.");}
+  }
+
+  async function refreshListings(){
+    const btn=$("refreshDataBtn");btn.disabled=true;btn.textContent="Refreshing…";
+    try{await refreshVictoriaBase(true);if(prefs.scope==="near"&&origin)await discoverNear(true);}
+    finally{btn.disabled=false;btn.textContent="↻ Refresh";renderDataStatus();}
   }
 
   function localQueryParts(includeCafe=true){
@@ -365,6 +405,9 @@
     if(prefs.saved==="loved")arr=arr.filter(x=>(p.favourites||[]).includes(x.id));
     if(prefs.saved==="want")arr=arr.filter(x=>p.reviews?.[x.id]?.status==="want");
     if(prefs.saved==="visited")arr=arr.filter(x=>p.reviews?.[x.id]?.status==="visited");
+    if(prefs.detailFilter==="hours")arr=arr.filter(x=>x.opening_hours);
+    if(prefs.detailFilter==="website")arr=arr.filter(x=>safeUrl(x.website));
+    if(prefs.detailFilter==="access")arr=arr.filter(x=>x.wheelchair);
     if(q)arr=arr.filter(x=>normalize(`${x.name} ${x.street} ${x.suburb} ${x.postcode} ${x.operator} ${(p.reviews?.[x.id]?.tags||[]).join(" ")}`).includes(q));
     const mode=$("sortSelect")?.value||prefs.sort;
     const avg=x=>reviewAverage(p.reviews?.[x.id]);
@@ -386,6 +429,8 @@
     $("resultsTitle").textContent=mapSearchBounds?"This map area":prefs.scope==="near"?(origin?`Near ${origin.label}`:"Near me"):SCOPE_LABEL[prefs.scope];
     const mapped=filtered.filter(p=>p.lat!=null).length;
     $("resultsMeta").textContent=`${filtered.length} ${filtered.length===1?"place":"places"}${mapped!==filtered.length?` · ${mapped} mapped`:""} · ${prefs.layers.map(x=>LAYER_LABEL[x]).join(" + ")}`;
+    $("savedHopCount").textContent=profile().savedHops?.length||0;
+    renderDataStatus();
   }
 
   function renderCards(){
@@ -396,7 +441,8 @@
       const distance=prefs.scope==="near"&&origin&&x.lat!=null?`<p class="place-distance">${distanceLabel(distanceFromOrigin(x))} away</p>`:"";
       const rating=x.layer==="opshop"?(avg?`<div class="card-rating"><strong>${avg.toFixed(1)}</strong>/10 · ${Object.keys(r?.ratings||{}).length} criteria</div>`:`<div class="card-rating">Not rated yet</div>`):(r?.notes?`<div class="card-rating">Saved in your field notes</div>`:`<div class="card-rating">Noted as a ${LAYER_SINGULAR[x.layer].toLowerCase()}</div>`);
       const tags=(r?.tags||[]).slice(0,5).map(t=>`<span class="tag">${tagGlyph(t)} #${esc(t)}</span>`).join("");
-      return `<article class="place-card ${highlightedPlaceId===x.id?"highlighted":""}" data-place="${esc(x.id)}"><div class="card-head"><div class="card-copy"><div class="place-type">${LAYER_GLYPH[x.layer]} ${esc(LAYER_SINGULAR[x.layer])}</div><h3 class="place-name">${esc(x.name)}</h3><p class="place-address ${addr.missing?"missing":""}">${esc(addr.text)}</p>${distance}</div><button class="fav ${fav?"on":""}" data-action="fav" data-id="${esc(x.id)}" aria-label="${fav?"Remove from loved places":"Add to loved places"}" aria-pressed="${fav}">${fav?"♥":"♡"}</button></div>${rating}<div class="tags">${tags}</div><div class="card-actions"><button class="primary" data-action="review" data-id="${esc(x.id)}">${x.layer==="opshop"?"Rate / note":"Save / note"}</button><button data-action="directions" data-id="${esc(x.id)}">Directions</button><div class="more-wrap"><button class="icon" data-action="more" data-id="${esc(x.id)}" aria-label="More actions" aria-expanded="false">•••</button><div class="more-menu hidden" data-menu="${esc(x.id)}"><button data-action="map" data-id="${esc(x.id)}">Show on map</button><button data-action="hop" data-id="${esc(x.id)}">${inHop?"✓ Remove from hop":"＋ Add to hop"}</button><button data-action="around" data-id="${esc(x.id)}">Around here</button><button data-action="status-want" data-id="${esc(x.id)}">${r?.status==="want"?"✓ ":""}Want to go</button><button data-action="status-visited" data-id="${esc(x.id)}">${r?.status==="visited"?"✓ ":""}Visited</button></div></div></div></article>`;
+      const trust=`<div class="trust-badges"><span class="trust-badge source">${x.manual?"✎":"✓"} ${esc(sourceLabel(x))}</span>${x.opening_hours?'<span class="trust-badge hours">◷ Hours listed</span>':""}${x.wheelchair?'<span class="trust-badge access">♿ Access info</span>':""}</div>`;
+      return `<article class="place-card ${highlightedPlaceId===x.id?"highlighted":""}" data-place="${esc(x.id)}" data-layer="${esc(x.layer)}"><div class="card-head"><div class="card-copy"><div class="place-type">${LAYER_GLYPH[x.layer]} ${esc(LAYER_SINGULAR[x.layer])}</div><h3 class="place-name">${esc(x.name)}</h3><p class="place-address ${addr.missing?"missing":""}">${esc(addr.text)}</p>${distance}</div><button class="fav ${fav?"on":""}" data-action="fav" data-id="${esc(x.id)}" aria-label="${fav?"Remove from loved places":"Add to loved places"}" aria-pressed="${fav}">${fav?"♥":"♡"}</button></div>${trust}${rating}<div class="tags">${tags}</div><div class="card-actions"><button class="primary" data-action="details" data-id="${esc(x.id)}">Details</button><button data-action="review" data-id="${esc(x.id)}">${x.layer==="opshop"?"Rate / note":"Save / note"}</button><button data-action="directions" data-id="${esc(x.id)}">Directions</button><div class="more-wrap"><button class="icon" data-action="more" data-id="${esc(x.id)}" aria-label="More actions" aria-expanded="false">•••</button><div class="more-menu hidden" data-menu="${esc(x.id)}"><button data-action="directions" data-id="${esc(x.id)}">Directions</button><button data-action="map" data-id="${esc(x.id)}">Show on map</button><button data-action="hop" data-id="${esc(x.id)}">${inHop?"✓ Remove from hop":"＋ Add to hop"}</button><button data-action="around" data-id="${esc(x.id)}">Around here</button><button data-action="status-want" data-id="${esc(x.id)}">${r?.status==="want"?"✓ ":""}Want to go</button><button data-action="status-visited" data-id="${esc(x.id)}">${r?.status==="visited"?"✓ ":""}Visited</button></div></div></div></article>`;
     }).join("");
   }
 
@@ -406,6 +452,7 @@
     qa("[data-scope]").forEach(b=>{const active=!mapSearchBounds&&b.dataset.scope===prefs.scope;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});
     qa("[data-layer]").forEach(el=>{const on=prefs.layers.includes(el.dataset.layer);el.classList.toggle("active",on);const cb=el.querySelector("input");if(cb)cb.checked=on;});
     qa("[data-saved]").forEach(b=>{const active=b.dataset.saved===prefs.saved;b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});
+    qa("[data-detail]").forEach(b=>{const active=b.dataset.detail===(prefs.detailFilter||"all");b.classList.toggle("active",active);b.setAttribute("aria-pressed",String(active));});
     $("radiusWrap").classList.toggle("hidden",prefs.scope!=="near");$("radiusSelect").value=String(prefs.radius);
     document.body.classList.toggle("map-hidden",!!prefs.mapHidden);$("mapToggleBtn").textContent=prefs.mapHidden?"Show map":"Hide map";$("mapToggleBtn").setAttribute("aria-pressed",String(!prefs.mapHidden));
     if(origin){$("originLabel").textContent=prefs.scope==="near"?"Near me":"Location ready";$("originSub").textContent=origin.label==="your location"?"Using your current location":`Starting near ${origin.label}`;}
@@ -474,6 +521,19 @@
   function cleanTag(s){return normalize(s).replace(/\s+/g,"-");}
   function tagLibrary(){const set=new Set();Object.values(profile().reviews||{}).forEach(r=>(r.tags||[]).forEach(t=>set.add(t)));return [...set].sort();}
 
+  function openDetails(place){
+    const addr=displayAddress(place),website=safeUrl(place.website),review=profile().reviews?.[place.id];
+    const status={want:"Want to go",visited:"Visited",skip:"Skipped"}[review?.status]||"Not marked";
+    const checked=place.checkedAt?dateLabel(place.checkedAt):(dataSnapshot.savedAt&&place.osm?dateLabel(dataSnapshot.savedAt):"Not recorded");
+    setModal(place.name,()=>`<div class="detail-hero"><div class="place-type">${LAYER_GLYPH[place.layer]} ${esc(LAYER_SINGULAR[place.layer])}</div><h3>${esc(place.name)}</h3><div>${esc(addr.text)}</div></div><div class="detail-grid"><div class="detail-cell"><small>Listing source</small><strong>${esc(sourceLabel(place))}</strong></div><div class="detail-cell"><small>Last map check</small><strong>${esc(checked)}</strong></div><div class="detail-cell wide"><small>Opening hours</small><strong>${esc(place.opening_hours||"Not listed—confirm before travelling")}</strong></div><div class="detail-cell"><small>Accessibility</small><strong>${esc(accessLabel(place.wheelchair))}</strong></div><div class="detail-cell"><small>Your status</small><strong>${esc(status)}</strong></div>${place.operator?`<div class="detail-cell wide"><small>Operator</small><strong>${esc(place.operator)}</strong></div>`:""}</div><div class="data-note">${esc(sourceNote(place))}</div><div class="dialog-actions" style="justify-content:flex-start">${website?`<a class="button-link" href="${esc(website)}" target="_blank" rel="noopener">Website</a>`:""}<button type="button" id="detailDirections">Directions</button><button type="button" id="detailHop">${routeIds.has(place.id)?"Remove from hop":"＋ Add to hop"}</button><button type="button" id="detailReview" class="primary">${place.layer==="opshop"?"Rate / note":"Save / note"}</button></div>`);
+    const body=$("modalBody");body.addEventListener("click",e=>{if(e.target.id==="detailDirections"){$("modal").close();openDirections(place);}if(e.target.id==="detailReview"){$("modal").close();openReview(place);}if(e.target.id==="detailHop"){toggleHop(place.id);e.target.textContent=routeIds.has(place.id)?"Remove from hop":"＋ Add to hop";toast(routeIds.has(place.id)?"Added to hop":"Removed from hop");}});$("modal").showModal();
+  }
+
+  function openDataGuide(){
+    setModal("How listings work",()=>`<div class="detail-hero"><div class="place-type">DATA · PRIVACY · PRACTICALITY</div><h3>A field guide, not a promise.</h3><div>Useful information with its uncertainty left visible.</div></div><div class="detail-grid"><div class="detail-cell"><small>Curated listings</small><strong>A reliable starting set of Victorian op shops</strong></div><div class="detail-cell"><small>Open-map listings</small><strong>Community-maintained places, locations and details</strong></div><div class="detail-cell"><small>Refresh rhythm</small><strong>Cached for seven days unless you refresh manually</strong></div><div class="detail-cell"><small>Your additions</small><strong>Private to this browser and included in backups</strong></div></div><div class="data-note">Opening hours, accessibility and shop status can change. Op-Shop-Hop shows when map information was refreshed and encourages checking before a special journey. Your ratings, notes, loved places and saved hops stay on this device.</div><div class="dialog-actions"><button type="button" id="guideRefresh" class="primary">Refresh listings now</button></div>`);
+    $("modalBody").addEventListener("click",e=>{if(e.target.id==="guideRefresh"){$("modal").close();refreshListings();}});$("modal").showModal();
+  }
+
   function openDirections(p){const dest=p.lat!=null?`${p.lat},${p.lon}`:[p.street,p.suburb,p.postcode].filter(Boolean).join(" ");const enc=encodeURIComponent(dest||p.name);setModal(`Directions · ${p.name}`,()=>`<p class="dialog-copy">${esc(displayAddress(p).text)}</p><div class="dialog-actions" style="justify-content:flex-start"><a class="button-link primary" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${enc}">Google Maps</a><a class="button-link" target="_blank" rel="noopener" href="https://maps.apple.com/?daddr=${enc}">Apple Maps</a>${p.lat!=null?`<a class="button-link" target="_blank" rel="noopener" href="https://www.waze.com/ul?ll=${p.lat}%2C${p.lon}&navigate=yes">Waze</a>`:""}</div>${p.lat!=null?`<p class="dialog-copy">${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</p>`:""}`);$("modal").showModal();}
 
   async function openAround(p){
@@ -483,8 +543,29 @@
     try{const data=await overpass(q);const items=(data.elements||[]).map(osmPlace).filter(Boolean).sort((a,b)=>haversine(p.lat,p.lon,a.lat,a.lon)-haversine(p.lat,p.lon,b.lat,b.lon)).slice(0,18);$("modalBody").innerHTML=items.length?items.map(x=>`<div style="padding:.6rem 0;border-bottom:1px solid var(--line)"><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(LAYER_SINGULAR[x.layer])} · ${Math.round(haversine(p.lat,p.lon,x.lat,x.lon)*1000)} m</div><div style="margin-top:.3rem"><a class="button-link" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(x.name+" "+x.lat+","+x.lon)}">Reviews / map</a></div></div>`).join(""):'<p>No mapped side quests found nearby.</p>'; }catch(e){$("modalBody").innerHTML='<p>Nearby discovery is temporarily unavailable.</p>';}
   }
 
-  function openRoute(){const ps=[...routeIds].map(placeById).filter(p=>p?.lat!=null);if(ps.length<2)return;const ordered=nearestNeighbour(ps,origin);const start=origin?`${origin.lat},${origin.lon}`:`${ordered[0].lat},${ordered[0].lon}`;const dest=`${ordered.at(-1).lat},${ordered.at(-1).lon}`;const wp=ordered.slice(0,-1).map(x=>`${x.lat},${x.lon}`).join("|");const url=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(start)}&destination=${encodeURIComponent(dest)}&travelmode=walking${wp?`&waypoints=${encodeURIComponent(wp)}`:""}`;setModal("Your hop",()=>`<ol>${ordered.map(x=>`<li><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(displayAddress(x).text)}</div></li>`).join("")}</ol><div class="dialog-actions" style="justify-content:flex-start"><a class="button-link primary" target="_blank" rel="noopener" href="${url}">Open walking route</a></div><p class="dialog-copy">Approximate stop order; your mapping app handles the street-by-street route.</p>`);$("modal").showModal();}
+  function routeUrl(ordered,mode="walking"){
+    const start=origin?`${origin.lat},${origin.lon}`:`${ordered[0].lat},${ordered[0].lon}`;const dest=`${ordered.at(-1).lat},${ordered.at(-1).lon}`;
+    const mids=(origin?ordered.slice(0,-1):ordered.slice(1,-1)).map(x=>`${x.lat},${x.lon}`).join("|");
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(start)}&destination=${encodeURIComponent(dest)}&travelmode=${mode}${mids?`&waypoints=${encodeURIComponent(mids)}`:""}`;
+  }
+  function routeDistance(ordered){let total=0,cur=origin;if(!cur&&ordered.length)cur=ordered[0];for(const stop of ordered){if(cur!==stop)total+=haversine(cur.lat,cur.lon,stop.lat,stop.lon);cur=stop;}return total;}
+  function transitToFirstUrl(stop){const from=origin?`&origin=${encodeURIComponent(`${origin.lat},${origin.lon}`)}`:"";return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${stop.lat},${stop.lon}`)}&travelmode=transit${from}`;}
+  function hopSummary(ordered,name="Op-Shop-Hop"){
+    return `${name}\n${ordered.map((x,i)=>`${i+1}. ${x.name} — ${displayAddress(x).text}`).join("\n")}\n${routeUrl(ordered,"walking")}`;
+  }
+  function openRoute(){
+    const selected=[...routeIds].map(placeById).filter(Boolean),mapped=selected.filter(p=>p.lat!=null);if(mapped.length<2)return;
+    const ordered=nearestNeighbour(mapped,origin),unmapped=selected.length-mapped.length,total=routeDistance(ordered);
+    setModal("Your hop",()=>`<div class="detail-hero"><div class="place-type">${ordered.length} STOPS · ABOUT ${total.toFixed(total<10?1:0)} KM BETWEEN STOPS</div><h3>A very good day out.</h3><div>We’ve arranged an efficient approximate order. You remain in charge of serendipity.</div></div><ol class="hop-list">${ordered.map(x=>`<li><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(displayAddress(x).text)}</div></li>`).join("")}</ol>${unmapped?`<div class="data-note">${unmapped} selected ${unmapped===1?"place is":"places are"} not included in routing because map coordinates are unavailable. You can still save the complete hop.</div>`:""}<div class="dialog-actions" style="justify-content:flex-start"><a class="button-link primary" target="_blank" rel="noopener" href="${routeUrl(ordered,"walking")}">Walk this hop</a><a class="button-link" target="_blank" rel="noopener" href="${routeUrl(ordered,"driving")}">Drive this hop</a><a class="button-link" target="_blank" rel="noopener" href="${transitToFirstUrl(ordered[0])}">Transit to first stop</a></div><div class="dialog-actions"><button type="button" id="copyHop">Copy itinerary</button><button type="button" id="saveHop" class="primary">Save this hop</button></div><p class="dialog-copy">Approximate order only; your mapping app handles live travel conditions and street-by-street directions.</p>`);
+    const body=$("modalBody");body.addEventListener("click",async e=>{if(e.target.id==="saveHop"){const name=prompt("Name this hop",[...new Set(selected.map(x=>x.suburb).filter(Boolean))].slice(0,2).join(" + ")||"My op-shop hop");if(!name?.trim())return;const p=profile();p.savedHops||=[];p.savedHops.push({id:`hop-${Date.now()}`,name:name.trim(),placeIds:[...routeIds],createdAt:new Date().toISOString()});saveProfiles();render();e.target.textContent="Saved ✓";e.target.disabled=true;toast("Hop saved");}if(e.target.id==="copyHop"){try{await navigator.clipboard.writeText(hopSummary(ordered));toast("Itinerary copied");}catch(err){toast("Copy is unavailable in this browser");}}});$("modal").showModal();
+  }
   function nearestNeighbour(arr,start){const left=[...arr],out=[];let cur=start||left.shift();if(!start)out.push(cur);while(left.length){left.sort((a,b)=>haversine(cur.lat,cur.lon,a.lat,a.lon)-haversine(cur.lat,cur.lon,b.lat,b.lon));cur=left.shift();out.push(cur);}return out;}
+
+  function openSavedHops(){
+    const p=profile(),hops=p.savedHops||[];
+    setModal("Saved hops",()=>hops.length?`<p class="dialog-copy">Load a saved itinerary back into the planner. Your saved hops stay in this browser and travel with exported backups.</p>${hops.slice().reverse().map(h=>{const valid=h.placeIds.map(placeById).filter(Boolean);return `<div class="saved-hop" data-saved-hop="${esc(h.id)}"><div><strong>${esc(h.name)}</strong><small>${valid.length} ${valid.length===1?"stop":"stops"} · saved ${esc(dateLabel(h.createdAt))}</small></div><div class="saved-hop-actions"><button type="button" data-load-hop="${esc(h.id)}">Load</button><button type="button" data-delete-hop="${esc(h.id)}" aria-label="Delete ${esc(h.name)}">×</button></div></div>`;}).join("")}`:'<div class="empty"><strong>No saved hops yet.</strong><br>Add two or more mapped places, plan the hop, then save it.</div>');
+    $("modalBody").addEventListener("click",e=>{const load=e.target.closest("[data-load-hop]");if(load){const h=p.savedHops.find(x=>x.id===load.dataset.loadHop);routeIds=new Set((h?.placeIds||[]).filter(id=>placeById(id)));$("modal").close();render();toast(`${h?.name||"Hop"} loaded`);return;}const del=e.target.closest("[data-delete-hop]");if(del){p.savedHops=p.savedHops.filter(x=>x.id!==del.dataset.deleteHop);saveProfiles();$("modal").close();openSavedHops();render();toast("Saved hop removed");}});$("modal").showModal();
+  }
 
   function focusPlaceCard(id,scroll=false){
     highlightedPlaceId=id;paintHighlightedCard();
@@ -502,12 +583,17 @@
     $("modalBody").addEventListener("click",e=>{if(e.target.id==="saveManualShop")saveManualShop();});
     $("modal").showModal();setTimeout(()=>$("manualName")?.focus(),0);
   }
-  function saveManualShop(){
+  async function saveManualShop(){
     const name=$("manualName").value.trim(),street=$("manualStreet").value.trim(),suburb=$("manualSuburb").value.trim(),postcode=$("manualPostcode").value.trim(),website=$("manualWebsite").value.trim();
     if(!name||!suburb){toast("Add a shop name and suburb");return;}
     if(postcode&&!/^3\d{3}$/.test(postcode)){toast("Use a four-digit Victorian postcode");return;}
-    const entry={id:`manual-${Date.now()}`,name,address:[street,suburb,postcode].filter(Boolean).join(", "),suburb,postcode,operator:"",source:"Added by you",manual:true,website};
-    const p=profile();p.manualShops ||= [];p.manualShops.push(entry);saveProfiles();places.push(canonicalSeed(entry));mapSearchBounds=null;$("modal").close();syncControls();render();toast("Shop added");
+    const entry={id:`manual-${Date.now()}`,name,address:[street,suburb,postcode].filter(Boolean).join(", "),suburb,postcode,operator:"",source:"Added by you",manual:true,website,addedAt:new Date().toISOString()};
+    const p=profile();p.manualShops ||= [];p.manualShops.push(entry);saveProfiles();const local=canonicalSeed(entry);places.push(local);mapSearchBounds=null;$("modal").close();syncControls();render();toast("Shop added");
+    if(street){
+      setStatus(`Locating ${name} on the map…`);
+      try{const q=[street,suburb,postcode,"Victoria","Australia"].filter(Boolean).join(", ");const res=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=au&limit=1&q=${encodeURIComponent(q)}`,{headers:{"Accept":"application/json"}});if(!res.ok)throw new Error("geocode");const hits=await res.json();if(hits.length){entry.lat=Number(hits[0].lat);entry.lon=Number(hits[0].lon);local.lat=entry.lat;local.lon=entry.lon;entry.checkedAt=Date.now();local.checkedAt=entry.checkedAt;saveProfiles();render();setStatus(`${name} added and mapped`);return;}}catch(e){}
+      setStatus(`${name} added · map position could not be confirmed`);
+    }
   }
 
   function openSettings(){
@@ -523,7 +609,7 @@
 
   function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`op-shop-hop-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);}
   async function importData(e){const file=e.target.files?.[0];if(!file)return;try{const x=JSON.parse(await file.text());if(!x?.profiles||!x?.activeProfileId)throw new Error("bad");localStorage.setItem(PROFILE_KEY,JSON.stringify(x));location.reload();}catch(err){toast("That backup file does not look valid");}}
-  function newProfile(){const name=prompt("Name this hopper profile");if(!name?.trim())return;const id=crypto.randomUUID?crypto.randomUUID():`p-${Date.now()}`;state.profiles[id]={id,name:name.trim(),categories:clone(DEFAULT_CATEGORIES),reviews:{},favourites:[],manualShops:[],createdAt:new Date().toISOString()};state.activeProfileId=id;saveProfiles();renderProfileSelect();render();}
+  function newProfile(){const name=prompt("Name this hopper profile");if(!name?.trim())return;const id=crypto.randomUUID?crypto.randomUUID():`p-${Date.now()}`;state.profiles[id]={id,name:name.trim(),categories:clone(DEFAULT_CATEGORIES),reviews:{},favourites:[],manualShops:[],savedHops:[],createdAt:new Date().toISOString()};state.activeProfileId=id;saveProfiles();renderProfileSelect();render();}
   function renderProfileSelect(){$("profileSelect").innerHTML=Object.values(state.profiles).map(p=>`<option value="${esc(p.id)}" ${p.id===state.activeProfileId?"selected":""}>${esc(p.name)}</option>`).join("");}
 
   function setModal(title,bodyFn){
@@ -537,13 +623,14 @@
     const action=b.dataset.action;
     if(action==="more"){const menu=document.querySelector(`[data-menu="${cssEscape(id)}"]`);qa(".more-menu").forEach(m=>{if(m!==menu)m.classList.add("hidden")});menu?.classList.toggle("hidden");b.setAttribute("aria-expanded",String(!menu?.classList.contains("hidden")));return;}
     qa(".more-menu").forEach(m=>m.classList.add("hidden"));
-    if(action==="fav")toggleFavourite(id);if(action==="review")openReview(p);if(action==="directions")openDirections(p);if(action==="map")showOnMap(p);if(action==="hop")toggleHop(id);if(action==="around")openAround(p);if(action==="status-want")setQuickStatus(id,"want");if(action==="status-visited")setQuickStatus(id,"visited");
+    if(action==="fav")toggleFavourite(id);if(action==="details")openDetails(p);if(action==="review")openReview(p);if(action==="directions")openDirections(p);if(action==="map")showOnMap(p);if(action==="hop")toggleHop(id);if(action==="around")openAround(p);if(action==="status-want")setQuickStatus(id,"want");if(action==="status-visited")setQuickStatus(id,"visited");
   }
 
   function wireUI(){
     qa("[data-scope]").forEach(b=>b.addEventListener("click",()=>changeScope(b.dataset.scope)));
     qa("[data-layer]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();toggleLayer(el.dataset.layer);}));
     qa("[data-saved]").forEach(b=>b.addEventListener("click",()=>{prefs.saved=b.dataset.saved;savePrefs();syncControls();render();}));
+    qa("[data-detail]").forEach(b=>b.addEventListener("click",()=>{prefs.detailFilter=b.dataset.detail;savePrefs();syncControls();render();}));
     $("allLayersBtn").addEventListener("click",()=>{prefs.layers=prefs.layers.length===LAYERS.length?["opshop"]:[...LAYERS];savePrefs();syncControls();render();if(prefs.scope==="near")discoverNear(true);});
     $("radiusSelect").addEventListener("change",()=>{prefs.radius=Number($("radiusSelect").value);savePrefs();render();discoverNear(true);applyScopeView();});
     $("sortSelect").addEventListener("change",()=>{prefs.sort=$("sortSelect").value;savePrefs();render();});
@@ -557,6 +644,7 @@
     $("clearRouteBtn").addEventListener("click",()=>{routeIds.clear();render();});$("planRouteBtn").addEventListener("click",openRoute);
     $("settingsBtn").addEventListener("click",openSettings);$("newProfileBtn").addEventListener("click",newProfile);$("profileSelect").addEventListener("change",e=>{state.activeProfileId=e.target.value;saveProfiles();routeIds.clear();render();});
     $("addShopBtn").addEventListener("click",openAddShop);
+    $("savedHopsBtn").addEventListener("click",openSavedHops);$("dataGuideBtn").addEventListener("click",openDataGuide);$("refreshDataBtn").addEventListener("click",refreshListings);
     $("allowLocationBtn").addEventListener("click",()=>{$("locationPrompt").close();prefs.locationChoice="use";savePrefs();requestLocation().catch(()=>{prefs.scope="metro";savePrefs();syncControls();render();applyScopeView();});});
     $("browseWithoutBtn").addEventListener("click",()=>{$("locationPrompt").close();prefs.locationChoice="browse";prefs.scope="metro";prefs.sort="suburb";savePrefs();syncControls();render();applyScopeView();setStatus("Browsing Melbourne · search an address or use location any time.");});
     $("modalClose").addEventListener("click",()=>$("modal").close());$("modal").addEventListener("click",e=>{if(e.target===$("modal"))$("modal").close();});
@@ -567,6 +655,7 @@
     profile().manualShops?.forEach(s=>{if(!places.some(p=>p.id===s.id))places.push(canonicalSeed({...s,layer:"opshop"}));});
     wireUI();renderProfileSelect();syncControls();render();initMap();
     refreshVictoriaBase(false);
+    if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
     if(prefs.locationChoice==="use"){
       requestLocation({silent:true}).catch(()=>{if(!origin){prefs.scope="metro";savePrefs();syncControls();render();applyScopeView();}});
     }else if(!prefs.locationChoice){setTimeout(()=>$("locationPrompt").showModal(),180);}else{setStatus("Browsing Melbourne · location is off.");}
