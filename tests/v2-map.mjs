@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {readFileSync} from 'node:fs';
+const require=createRequire(import.meta.url);
+const {chromium}=require('playwright');
+const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+const context=await browser.newContext({viewport:{width:390,height:844}});
+const page=await context.newPage(),errors=[];
+page.on('pageerror',e=>errors.push(e.message));
+await page.route('https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js',r=>r.fulfill({contentType:'application/javascript',body:readFileSync(require.resolve('maplibre-gl/dist/maplibre-gl.js'))}));
+await page.route('https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css',r=>r.fulfill({contentType:'text/css',body:readFileSync(require.resolve('maplibre-gl/dist/maplibre-gl.css'))}));
+await page.route('https://tile.openstreetmap.org/**',r=>r.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64')}));
+await page.route('https://overpass-api.de/**',r=>r.fulfill({contentType:'application/json',body:JSON.stringify({elements:[{type:'node',id:98001,lat:-37.8136,lon:144.9631,tags:{name:'Mapped treasure',shop:'charity','addr:suburb':'Melbourne'}}]})}));
+try{
+ await page.goto(process.env.APP_URL||'http://127.0.0.1:4173/',{waitUntil:'domcontentloaded'});
+ await page.getByRole('button',{name:'Browse without location'}).click();
+ await page.waitForFunction(()=>document.querySelector('#mapCount')?.textContent==='1 plotted');
+ assert.equal(await page.locator('.map-fallback').count(),0);
+ await page.locator('#placeSearch').fill('not present');
+ assert.equal(await page.locator('#mapCount').innerText(),'0 plotted','Map follows list filtering');
+ await page.locator('#clearPlaceSearch').click();
+ assert.equal(await page.locator('#mapCount').innerText(),'1 plotted');
+ await page.locator('#searchMapBtn').click();
+ await page.waitForFunction(()=>document.querySelector('#resultsTitle')?.textContent==='This map area');
+ await page.getByRole('button',{name:'Melbourne',exact:true}).click();
+ await page.locator('#placeSearch').fill('Mapped treasure');
+ await page.getByRole('button',{name:'More actions'}).click();
+ await page.getByRole('button',{name:'Show on map',exact:true}).click();
+ assert.deepEqual(errors,[]);
+ console.log('Real MapLibre browser checks passed: renderer startup, map/list filtering, viewport search and show-on-map.');
+}finally{await browser.close();}

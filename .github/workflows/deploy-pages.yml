@@ -1,0 +1,45 @@
+name: Publish field guide
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: python3 -m http.server 4173 --bind 127.0.0.1 &
+      - run: npm run test:e2e
+      - run: npm run test:map
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Package public app assets only
+        run: |
+          mkdir _site
+          cp index.html app-v2.js styles-v2.css seed-stores.js sw.js manifest.webmanifest icon.svg _site/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
-  <link rel="stylesheet" href="styles-v2.css?v=2.2.0">
+  <link rel="stylesheet" href="styles-v2.css?v=2.2.1">
 </head>
 <body>
   <header class="topbar">
@@ -158,12 +158,12 @@
     <div><button id="clearRouteBtn" type="button">Clear</button><button id="planRouteBtn" class="primary" type="button">Plan hop</button></div>
   </div>
 
-  <dialog id="locationPrompt" class="dialog">
+  <dialog id="locationPrompt" class="dialog" aria-labelledby="locationPromptTitle">
     <div class="dialog-shell">
       <div class="dialog-body location-prompt">
         <div class="hero-dot">◎</div>
         <p class="eyebrow">FIRST THING</p>
-        <h2>Find good stuff near you?</h2>
+        <h2 id="locationPromptTitle">Find good stuff near you?</h2>
         <p>Op-Shop-Hop can use your location to show the nearest places in whichever layers you choose. This is a one-off location check; live following stays off unless you explicitly switch it on.</p>
         <div class="dialog-actions">
           <button id="allowLocationBtn" class="primary" type="button">Use my location</button>
@@ -173,7 +173,7 @@
     </div>
   </dialog>
 
-  <dialog id="modal" class="dialog">
+  <dialog id="modal" class="dialog" aria-labelledby="modalTitle">
     <div class="dialog-shell">
       <div class="dialog-head"><h2 id="modalTitle"></h2><button id="modalClose" class="icon" type="button" aria-label="Close">×</button></div>
       <div id="modalBody" class="dialog-body"></div>
@@ -183,7 +183,7 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-  <script src="seed-stores.js?v=2.2.0"></script>
-  <script src="app-v2.js?v=2.2.0"></script>
+  <script src="seed-stores.js?v=2.2.1"></script>
+  <script src="app-v2.js?v=2.2.1"></script>
 </body>
 </html>

@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const source=readFileSync(new URL('../app-v2.js',import.meta.url),'utf8');
+const initial={activeProfileId:'a',profiles:{a:{id:'a',name:'A',manualShops:[{id:'manual-a',name:'Private A',suburb:'Fitzroy'}]},b:{id:'b',name:'B',manualShops:[{id:'manual-b',name:'Private B',suburb:'Brunswick'}]}}};
+const storage=new Map([['op-shop-hop-v1',JSON.stringify(initial)]]);
+const elements={scopeStatus:{},dataFreshness:{}};
+let failFetch=true;
+const sandbox={window:{OP_SHOP_SEEDS:[]},crypto:{randomUUID:()=> 'guest'},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},document:{getElementById:id=>elements[id]},navigator:{},console,URL,Date,setTimeout,clearTimeout,AbortController,fetch:async()=>{if(failFetch)throw Error('Offline');return {ok:true,json:async()=>({elements:[]})};}};
+// Expose functions only within this test; no test hooks are shipped to the app.
+vm.runInNewContext(source.replace('  init();',`  render=()=>{};
+  window.test={state,prefs,validProfileState,mergePlaces,osmPlace,syncProfilePlaces,refreshVictoriaBase,overpass,validCoordinates,getPlaces:()=>places,setPlaces:p=>places=p};`),sandbox);
+const t=sandbox.window.test;
+const place=(id,name,street,suburb,lat=-37.8,lon=144.97)=>({id,name,street,suburb,lat,lon,layer:'opshop',osm:true,checkedAt:Date.now()});
+t.syncProfilePlaces();assert.deepEqual(Array.from(t.getPlaces(),p=>p.id),['manual-a']);
+t.state.activeProfileId='b';t.syncProfilePlaces();assert.deepEqual(Array.from(t.getPlaces(),p=>p.id),['manual-b']);
+t.state.profiles.b.savedHops=[{id:'h',name:'Saved',placeIds:['osm-book'],places:[{...place('osm-book','Saved Bookshop','1 High St','Fitzroy'),layer:'books'}]}];
+t.syncProfilePlaces();assert(t.getPlaces().some(p=>p.id==='osm-book'),'Saved shop details survive loss of discovery cache');
+t.setPlaces([place('one','Salvos','1 High Street','Fitzroy')]);
+t.mergePlaces([place('two','Salvos','1 High Street','Northcote',-37.77)]);assert.equal(t.getPlaces().length,2,'Same address text in different suburbs must not merge');
+t.mergePlaces([place('three','Salvos','2 High Street','Fitzroy')]);assert.equal(t.getPlaces().length,3,'Separate branches in one suburb must not merge');
+t.mergePlaces([{...place('one','Salvos','1 High Street','Fitzroy'),opening_hours:'Mo-Sa 09:00-16:00'}]);assert.equal(t.getPlaces()[0].opening_hours,'Mo-Sa 09:00-16:00','Refresh updates hours for same OSM identity');
+t.setPlaces([{...place('seed','Salvos','1 High Street','Fitzroy'),osm:false,official:true,lat:null,lon:null}]);t.mergePlaces([place('osm-node-1','Salvos Stores','1 High St','Fitzroy')]);assert.equal(t.getPlaces().length,1,'True seed/OSM duplicates still merge');assert.equal(t.getPlaces()[0].id,'seed');
+assert.equal(t.osmPlace({type:'node',id:1,lat:'broken',lon:144.9,tags:{name:'Shop'}}),null);
+assert.equal(t.osmPlace({type:'node',id:1,lat:-100,lon:144.9,tags:{name:'Shop'}}),null);
+assert(t.validProfileState(initial));
+for(const bad of [{profiles:{},activeProfileId:'missing'},{...initial,profiles:{a:{id:'a',name:'A',reviews:[]}}},{...initial,profiles:{a:{id:'a',name:'A',savedHops:[{id:'h',name:'H',placeIds:null}]}}},{...initial,profiles:{a:{id:'a',name:'A',reviews:{one:{ratings:{vibe:100}}}}}}])assert.equal(t.validProfileState(bad),false,'Invalid backup rejected before mutation');
+t.setPlaces([]);const cached=place('stale','Offline treasure','12 Test Street','Fitzroy');storage.set('op-shop-hop-v2-vic-cache-v1',JSON.stringify({savedAt:Date.now()-8*86400000,places:[cached]}));await t.refreshVictoriaBase();assert(t.getPlaces().some(p=>p.id==='stale'));assert.match(elements.dataFreshness.textContent,/older listings/);
+failFetch=false;await t.refreshVictoriaBase(true);assert.match(elements.dataFreshness.textContent,/updated today/);
+// Service-worker updates must not erase another app's offline caches on the shared GitHub Pages origin.
+const handlers={},deleted=[];
+vm.runInNewContext(readFileSync(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(event,fn)=>handlers[event]=fn,clients:{claim:async()=>{}},location:{origin:'https://example.test'}},caches:{keys:async()=>['other-app-cache','op-shop-hop-v2.2.0','op-shop-hop-v2.2.1'],delete:async k=>deleted.push(k)}});
+let activation;handlers.activate({waitUntil:p=>activation=p});await activation;assert.deepEqual(deleted,['op-shop-hop-v2.2.0']);
+console.log('Regression checks passed: profile isolation, hop recovery, duplicate matching, mutable hours, invalid coordinates/backups, stale cache fallback and cache ownership.');
