@@ -431,7 +431,7 @@
     const b=map.getBounds(),z=map.getZoom();
     const includeCafe=z>=12.2;
     const parts=localQueryParts(includeCafe).filter(x=>!x.includes('shop"="charity')&&!x.includes('second_hand')&&!x.includes('shop"="clothes')||z>=10);
-    if(!parts.length){if(prefs.layers.includes("cafe")&&!includeCafe)toast("Zoom in a little to load cafés");return;}
+    if(!parts.length){mapSearchBounds=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()];render();setStatus("Showing cached listings in this map area · zoom in to refresh local shops and cafés.");return;}
     const south=b.getSouth(),west=b.getWest(),north=b.getNorth(),east=b.getEast();
     setStatus(includeCafe?"Searching this map area…":"Searching this map area · cafés load when zoomed in…");
     const body=parts.map(p=>`nwr(${south},${west},${north},${east})${p};`).join("");

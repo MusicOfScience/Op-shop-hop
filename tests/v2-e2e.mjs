@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {mkdirSync} from "node:fs";
 import {createRequire} from "node:module";
 const require=createRequire(import.meta.url);
 const {chromium}=require("playwright");
@@ -112,9 +113,11 @@ try{
   await page.keyboard.press("Space");
   assert.equal(await page.locator('[data-layer="books"] input').isChecked(),false);
 
+  mkdirSync("test-results",{recursive:true});
   for(const width of [320,390,768,1280]){
     await page.setViewportSize({width,height:844});
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`No horizontal overflow at ${width}px`);
+    await page.screenshot({path:`test-results/list-${width}.png`,fullPage:true});
   }
   await page.setViewportSize({width:390,height:844});
 

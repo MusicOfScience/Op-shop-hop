@@ -7,7 +7,7 @@ Reviewed upstream main `40886eff56e7fdf5cdc41a714d6a35db97eda87b` and the establ
 - Reload each profile's personal listings on profile creation/switch. Remove other profiles' listings and clear the current hop; existing profile/review identifiers are preserved.
 - Stop merging branches solely because they share a suburb or street name. Require matching identity and corroborating address/geographic evidence; retain real seed/OpenStreetMap joins and update metadata for the same OSM identity.
 - Keep expired statewide discovery caches available during refresh and network failure. Distinguish unavailable/stale/live freshness. Cache local book/record/café discoveries; retain complete place snapshots inside newly saved itineraries.
-- Discover books and records in overview/list mode without requiring WebGL. Cafés remain bounded to nearby/map discovery.
+- Discover books and records in overview/list mode without requiring WebGL. Wide-zoom map searches filter cached listings immediately and explain how to zoom in for a live refresh. Cafés remain bounded to nearby/map discovery.
 - Validate backup profiles, reviews, ratings, categories, additions and hops before replacement. Keep and provide an export of the pre-import recovery backup. Surface a persistent warning if device storage rejects personal writes.
 - Retain a searched starting point across reloads. Validate coordinates, handle stale address responses, clear network timers, stop failed live following, and render controls after live position updates.
 - Support keyboard/assistive-technology checkbox changes, label dialogs, enlarge mobile touch targets, avoid iOS text-input zoom, and reduce introductory space.

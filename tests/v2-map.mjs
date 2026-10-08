@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdirSync} from 'node:fs';
 const require=createRequire(import.meta.url);
 const {chromium}=require('playwright');
 const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
@@ -27,6 +27,8 @@ try{
  await page.locator('#placeSearch').fill('Mapped treasure');
  await page.getByRole('button',{name:'More actions'}).click();
  await page.getByRole('button',{name:'Show on map',exact:true}).click();
+ mkdirSync('test-results',{recursive:true});
+ await page.screenshot({path:'test-results/map-mobile.png',fullPage:true});
  assert.deepEqual(errors,[]);
  console.log('Real MapLibre browser checks passed: renderer startup, map/list filtering, viewport search and show-on-map.');
-}catch(e){console.log('Map state:',await page.locator('#mapCount').innerText(),await page.locator('#scopeStatus').innerText(),await page.locator('#resultsMeta').innerText());console.log('Page errors:',errors);throw e;}finally{await browser.close();}
+}catch(e){mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/map-failure.png',fullPage:true});console.log('Map state:',await page.locator('#mapCount').innerText(),await page.locator('#scopeStatus').innerText(),await page.locator('#resultsMeta').innerText());console.log('Page errors:',errors);throw e;}finally{await browser.close();}
