@@ -7,9 +7,10 @@ const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usag
 const context=await browser.newContext({viewport:{width:390,height:844}});
 const page=await context.newPage(),errors=[];
 page.on('pageerror',e=>errors.push(e.message));
+page.on('console',m=>{if(['error','warning'].includes(m.type()))console.log('Map console:',m.text());});
 await page.route('https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js',r=>r.fulfill({contentType:'application/javascript',body:readFileSync(require.resolve('maplibre-gl/dist/maplibre-gl.js'))}));
 await page.route('https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css',r=>r.fulfill({contentType:'text/css',body:readFileSync(require.resolve('maplibre-gl/dist/maplibre-gl.css'))}));
-await page.route('https://tile.openstreetmap.org/**',r=>r.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==','base64')}));
+await page.route('https://tile.openstreetmap.org/**',r=>r.fulfill({contentType:'image/png',body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAACvklEQVR4nO3TMQEAIAzAMMC/2ElAxo4mCvr0zsyBqrcdAJsMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYA0A5BmANIMQJoBSDMAaQYgzQCkGYC0D3dZBNBfrtGOAAAAAElFTkSuQmCC','base64')}));
 await page.route('https://overpass-api.de/**',r=>r.fulfill({contentType:'application/json',body:JSON.stringify({elements:[{type:'node',id:98001,lat:-37.8136,lon:144.9631,tags:{name:'Mapped treasure',shop:'charity','addr:suburb':'Melbourne'}}]})}));
 try{
  await page.goto(process.env.APP_URL||'http://127.0.0.1:4173/',{waitUntil:'domcontentloaded'});
@@ -28,4 +29,4 @@ try{
  await page.getByRole('button',{name:'Show on map',exact:true}).click();
  assert.deepEqual(errors,[]);
  console.log('Real MapLibre browser checks passed: renderer startup, map/list filtering, viewport search and show-on-map.');
-}finally{await browser.close();}
+}catch(e){console.log('Map state:',await page.locator('#mapCount').innerText(),await page.locator('#scopeStatus').innerText(),await page.locator('#resultsMeta').innerText());console.log('Page errors:',errors);throw e;}finally{await browser.close();}
