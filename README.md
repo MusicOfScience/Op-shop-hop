@@ -4,7 +4,7 @@ A mobile-first Victorian op-shop field guide, personal rating notebook and hop p
 
 ## What V2.2 does
 
-- Finds op shops from a verified Victorian seed list plus live OpenStreetMap/Overpass discovery.
+- Finds op shops from a curated Victorian seed list plus live OpenStreetMap/Overpass discovery.
 - Shows where listing information came from, when open-map data was refreshed and which places include hours, website or accessibility information.
 - Caches the statewide open-map layer for seven days, with a clear manual refresh control.
 - Opens map-first on mobile, with **Use my location** or **suburb / street / postcode** search.
@@ -24,3 +24,15 @@ A mobile-first Victorian op-shop field guide, personal rating notebook and hop p
 The shared shop layer combines a curated starting list with public/open geographic data. Personal reviews, notes, additions and saved hops are stored in browser localStorage; they are not uploaded by this static site. Cross-device accounts/sync would require a backend in a later version.
 
 Map data © OpenStreetMap contributors.
+
+## Maintenance and publishing
+
+Run `npm test` for smoke and behavioural regression checks. Serve the app with
+`python3 -m http.server 4173 --bind 127.0.0.1`, then run `npm run test:e2e` and
+`npm run test:map` after installing Playwright Chromium. Browser tests use deterministic
+service fixtures, including a real MapLibre renderer test.
+
+The Pages workflow validates the app before publishing only its public assets.
+Repository Settings → Pages must have GitHub Actions selected as the publishing
+source. Keep the repository private; check plan eligibility if Pages is unavailable.
+See [REVIEW.md](REVIEW.md) for the repair scope and remaining data/hosting limitations.

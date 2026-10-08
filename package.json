@@ -1,13 +1,15 @@
 {
   "name": "op-shop-hop",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/v2-smoke.mjs",
-    "test:e2e": "node tests/v2-e2e.mjs"
+    "test": "node tests/v2-smoke.mjs && node tests/v2-regressions.mjs",
+    "test:e2e": "node tests/v2-e2e.mjs",
+    "test:map": "node tests/v2-map.mjs"
   },
   "devDependencies": {
-    "playwright": "1.62.1"
+    "playwright": "1.62.1",
+    "maplibre-gl": "4.7.1"
   }
 }

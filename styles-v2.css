@@ -95,3 +95,18 @@ a{color:inherit}
   .desktop-grid{display:grid;grid-template-columns:minmax(420px,.93fr) minmax(0,1.07fr);gap:.8rem;align-items:start}.desktop-map{position:sticky;top:66px}.desktop-map #map{height:calc(100dvh - 92px);max-height:780px}.desktop-results .results-head{padding-top:.4rem}
 }
 body.map-hidden .map-panel{display:none}
+
+/* Keep the established field-guide design usable with touch, keyboard and text zoom. */
+.layer-chip{position:relative}
+.layer-chip input{appearance:auto;position:absolute;opacity:0;inset:0;width:100%;height:100%;cursor:pointer}
+.layer-chip:focus-within{outline:3px solid var(--ink);outline-offset:3px}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+@media(max-width:650px){
+  .intro h1{font-size:1.6rem;line-height:1.15}
+  .intro .eyebrow{display:none}
+  button,.scope-chip,.saved-chip,.detail-chip,.layer-chip{min-height:44px;font-size:.875rem}
+  .location-search input,.field input,.field textarea{font-size:1rem}
+  .scope-row,.layer-row,.saved-row,.detail-filter-row{flex-wrap:wrap}
+  .origin-head,.results-head{flex-wrap:wrap}
+  .topbar-inner{flex-wrap:wrap}
+}

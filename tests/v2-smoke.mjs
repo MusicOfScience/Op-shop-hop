@@ -42,6 +42,6 @@ assert(app.includes("openSavedHops"),"Saved itineraries must remain available");
 assert(app.includes("serviceWorker.register"),"Offline app support must remain registered");
 assert(styles.includes("prefers-reduced-motion"),"Reduced-motion preferences must be respected");
 assert.equal(manifest.display,"standalone","The installable app must open standalone");
-assert(serviceWorker.includes("op-shop-hop-v2.2.0"),"The offline cache version must match the release");
+assert(serviceWorker.includes("op-shop-hop-v2.2.1"),"The offline cache version must match the release");
 
 console.log(`V2.2 smoke checks passed: ${seeds.length} fallback shops, ${ids.length} unique UI ids, installable offline shell.`);

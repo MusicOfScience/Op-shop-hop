@@ -4,6 +4,7 @@
   const PROFILE_KEY = "op-shop-hop-v1";
   const PREF_KEY = "op-shop-hop-v2-prefs";
   const VIC_CACHE_KEY = "op-shop-hop-v2-vic-cache-v1";
+  const LOCAL_CACHE_KEY = "op-shop-hop-v2-local-cache-v1";
   const LEGACY_LAYER_KEY = "op-shop-hop-layers-v1";
   const VIC_CACHE_TTL = 7 * 86400000;
 
@@ -38,7 +39,7 @@
   const prefs = loadPrefs();
   let places = (window.OP_SHOP_SEEDS || []).map(canonicalSeed);
   let filtered = [];
-  let origin = null;
+  let origin = prefs.locationChoice==="search"&&validCoordinates(prefs.searchOrigin)?prefs.searchOrigin:null;
   let map = null;
   let mapReady = false;
   let followWatch = null;
@@ -57,10 +58,26 @@
   function normalize(s){return String(s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g," ").trim();}
   const esc = s => String(s ?? "").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 
+  function validProfileState(x){
+    const record=v=>v&&typeof v==="object"&&!Array.isArray(v);
+    const strings=v=>Array.isArray(v)&&v.every(t=>typeof t==="string");
+    if(!record(x)||!record(x.profiles)||typeof x.activeProfileId!=="string"||!Object.hasOwn(x.profiles,x.activeProfileId))return false;
+    return Object.entries(x.profiles).every(([id,p])=>record(p)&&p.id===id&&typeof p.name==="string"&&
+      (p.categories==null||Array.isArray(p.categories)&&p.categories.every(c=>record(c)&&typeof c.id==="string"&&typeof c.name==="string"&&["always","adhoc","hidden"].includes(c.mode)))&&
+      (p.favourites==null||strings(p.favourites))&&
+      (p.manualShops==null||Array.isArray(p.manualShops)&&p.manualShops.every(v=>record(v)&&typeof v.id==="string"&&typeof v.name==="string"&&typeof v.suburb==="string"))&&
+      (p.savedHops==null||Array.isArray(p.savedHops)&&p.savedHops.every(h=>record(h)&&typeof h.id==="string"&&typeof h.name==="string"&&strings(h.placeIds)&&
+        (h.places==null||Array.isArray(h.places)&&h.places.every(v=>record(v)&&typeof v.id==="string"&&typeof v.name==="string"&&LAYERS.includes(v.layer)))))&&
+      (p.reviews==null||record(p.reviews)&&Object.values(p.reviews).every(r=>record(r)&&
+        (r.notes==null||typeof r.notes==="string")&&(r.tags==null||strings(r.tags))&&
+        (r.ratings==null||record(r.ratings)&&Object.values(r.ratings).every(n=>Number.isFinite(Number(n))&&Number(n)>=0&&Number(n)<=10))&&
+        (r.customRatings==null||Array.isArray(r.customRatings)&&r.customRatings.every(c=>record(c)&&typeof c.name==="string"&&Number.isFinite(Number(c.value))&&Number(c.value)>=0&&Number(c.value)<=10)))));
+  }
+
   function loadProfileState(){
     try{
       const x = JSON.parse(localStorage.getItem(PROFILE_KEY));
-      if(x?.profiles && x?.activeProfileId){
+      if(validProfileState(x)){
         Object.values(x.profiles).forEach(p=>{
           p.categories ||= clone(DEFAULT_CATEGORIES); p.reviews ||= {}; p.favourites ||= []; p.manualShops ||= []; p.savedHops ||= [];
         });
@@ -78,11 +95,31 @@
       try{const old=JSON.parse(localStorage.getItem(LEGACY_LAYER_KEY));if(Array.isArray(old)&&old.length)p.layers=old.filter(x=>LAYERS.includes(x));}catch(e){}
     }
     if(!p.layers?.length)p.layers=["opshop"];
+    p.layers=p.layers.filter(x=>LAYERS.includes(x));if(!p.layers.length)p.layers=["opshop"];
+    if(!Object.hasOwn(SCOPE_LABEL,p.scope))p.scope="metro";
+    if(![2,5,10,25].includes(Number(p.radius)))p.radius=5;
+    if(!["all","loved","want","visited"].includes(p.saved))p.saved="all";
+    if(!["all","hours","website","access"].includes(p.detailFilter))p.detailFilter="all";
+    if(!["distance","distance-desc","suburb","rating","name"].includes(p.sort))p.sort="suburb";
     return p;
   }
 
-  function saveProfiles(){localStorage.setItem(PROFILE_KEY,JSON.stringify(state));}
-  function savePrefs(){localStorage.setItem(PREF_KEY,JSON.stringify(prefs));}
+  function writeStorage(key,value){
+    try{localStorage.setItem(key,JSON.stringify(value));return true;}
+    catch(e){if(key.startsWith(PROFILE_KEY)){
+      let alert=$("storageStatus");if(!alert){alert=document.createElement("p");alert.id="storageStatus";alert.setAttribute("role","alert");document.querySelector(".trust-strip")?.after(alert);}
+      alert.textContent="Changes could not be saved on this device. Export a backup before closing.";
+    }return false;}
+  }
+  function saveProfiles(){return writeStorage(PROFILE_KEY,state);}
+  function savePrefs(){return writeStorage(PREF_KEY,prefs);}
+  function syncProfilePlaces(){
+    places=places.filter(p=>!p.manual&&!p.hopSnapshot);
+    profile().manualShops.forEach(s=>places.push(canonicalSeed({...s,manual:true})));
+    profile().savedHops.forEach(h=>(h.places||[]).forEach(s=>{
+      if(!places.some(p=>p.id===s.id))places.push({...s,hopSnapshot:true});
+    }));
+  }
   function profile(){return state.profiles[state.activeProfileId];}
 
   function canonicalSeed(s){
@@ -130,6 +167,7 @@
     if(suburb && normalize(street)===normalize(suburb))return "";
     return street;
   }
+  function validCoordinates(p){return p&&typeof p.lat==="number"&&typeof p.lon==="number"&&Number.isFinite(p.lat)&&Number.isFinite(p.lon)&&Math.abs(p.lat)<=90&&Math.abs(p.lon)<=180;}
   function numberOrNull(v){if(v==null||v==="")return null;const n=Number(v);return Number.isFinite(n)?n:null;}
   function canonicalOrg(s){const n=normalize(s);if(/salvo|salvation army/.test(n))return"salvos";if(/vinn|vincent de paul/.test(n))return"vinnies";if(/red cross/.test(n))return"redcross";if(/sacred heart/.test(n))return"sacredheart";if(/save the children/.test(n))return"savethechildren";if(/helping hands/.test(n))return"helpinghands";if(/brotherhood/.test(n))return"brotherhood";if(/epilepsy/.test(n))return"epilepsy";if(/don bosco/.test(n))return"donbosco";if(/uniting/.test(n))return"uniting";return n;}
   function streetCore(s){return normalize(s).replace(/\bstreet\b/g,"st").replace(/\broad\b/g,"rd").replace(/\bavenue\b/g,"ave").replace(/\bparade\b/g,"pde");}
@@ -146,7 +184,7 @@
 
   function osmPlace(el){
     const t=el.tags||{};const lat=el.lat??el.center?.lat,lon=el.lon??el.center?.lon;
-    if(lat==null||lon==null)return null;
+    if(lat==null||lon==null||!Number.isFinite(Number(lat))||!Number.isFinite(Number(lon))||Math.abs(Number(lat))>90||Math.abs(Number(lon))>180)return null;
     const rawName=(t.name||t.brand||t.operator||"").trim();
     if(!rawName||/^(bookshop|second[ -]?hand shop|charity shop|op shop|cafe)$/i.test(rawName))return null;
     const suburb=t["addr:suburb"]||t["addr:place"]||t["addr:city"]||t["addr:town"]||t["addr:village"]||t["is_in:suburb"]||"";
@@ -157,15 +195,21 @@
   function mergePlaces(incoming){
     incoming.filter(Boolean).forEach(o=>{
       let match=places.find(p=>p.id===o.id);
-      if(!match && o.street){
-        const oc=streetCore(o.street);const org=canonicalOrg(`${o.name} ${o.operator}`);
-        match=places.find(p=>p.street&&streetCore(p.street)===oc&&(canonicalOrg(`${p.name} ${p.operator}`)===org||fuzzyName(p.name,o.name)));
-      }
-      if(!match && o.suburb){
-        const org=canonicalOrg(`${o.name} ${o.operator}`);
-        match=places.find(p=>normalize(p.suburb)===normalize(o.suburb)&&(canonicalOrg(`${p.name} ${p.operator}`)===org||fuzzyName(p.name,o.name)));
+      if(!match && !o.manual){
+        match=places.find(p=>{
+          if(p.manual||p.layer!==o.layer)return false;
+          const sameName=canonicalOrg(`${p.name} ${p.operator}`)===canonicalOrg(`${o.name} ${o.operator}`)||fuzzyName(p.name,o.name);
+          if(!sameName)return false;
+          if(p.street&&o.street)return streetCore(p.street)===streetCore(o.street)&&
+            ((p.suburb&&o.suburb&&normalize(p.suburb)===normalize(o.suburb))||
+             (p.postcode&&o.postcode&&p.postcode===o.postcode)||
+             (p.lat!=null&&o.lat!=null&&haversine(p.lat,p.lon,o.lat,o.lon)<.15));
+          return p.lat!=null&&o.lat!=null&&haversine(p.lat,p.lon,o.lat,o.lon)<.05;
+        });
       }
       if(match){
+        // Same OSM identity: refresh mutable metadata rather than keeping old hours forever.
+        if(match.id===o.id&&o.osm){Object.assign(match,o);return;}
         if(match.lat==null){match.lat=o.lat;match.lon=o.lon;}
         if(!match.street&&o.street)match.street=o.street;
         if(!match.suburb&&o.suburb)match.suburb=o.suburb;
@@ -213,7 +257,8 @@
   function renderDataStatus(){
     const el=$("dataFreshness");if(!el)return;
     if(dataSnapshot.savedAt)el.textContent=`Open-map listings updated ${dateLabel(dataSnapshot.savedAt).toLowerCase()} · ${dataSnapshot.count} records cached`;
-    else el.textContent="Curated list ready · live map update pending";
+    else el.textContent=dataSnapshot.mode==="unavailable"?"Curated list available · live refresh unavailable":"Curated list ready · live map update pending";
+    if(dataSnapshot.mode==="stale")el.textContent+=" · refresh unavailable; showing older listings";
   }
 
   function haversine(aLat,aLon,bLat,bLon){const R=6371,dLat=(bLat-aLat)*Math.PI/180,dLon=(bLon-aLon)*Math.PI/180;const a=Math.sin(dLat/2)**2+Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLon/2)**2;return 2*R*Math.asin(Math.sqrt(a));}
@@ -310,29 +355,36 @@
     let last;
     for(const url of endpoints){
       try{
-        const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),28000);
-        const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},body:`data=${encodeURIComponent(query)}`,signal:controller.signal});
-        clearTimeout(timer);if(!res.ok)throw new Error(`Overpass ${res.status}`);return await res.json();
+        const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),query.includes("timeout:50")?55000:32000);
+        try{const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},body:`data=${encodeURIComponent(query)}`,signal:controller.signal});
+        if(!res.ok)throw new Error(`Overpass ${res.status}`);const data=await res.json();if(!Array.isArray(data.elements)||data.remark)throw new Error("Incomplete open-map response");return data;
+        }finally{clearTimeout(timer);}
       }catch(e){last=e;}
     }
     throw last||new Error("Open-map service unavailable");
   }
 
   async function refreshVictoriaBase(force=false){
-    if(!force){
-      try{const c=JSON.parse(localStorage.getItem(VIC_CACHE_KEY));if(c?.savedAt&&Date.now()-c.savedAt<VIC_CACHE_TTL&&Array.isArray(c.places)){dataSnapshot={savedAt:c.savedAt,count:c.places.length,mode:"cache"};mergePlaces(c.places);render();renderDataStatus();setStatus(`Using open-map listings updated ${dateLabel(c.savedAt).toLowerCase()}`);return;}}catch(e){}
-    }
+    try{
+      const c=JSON.parse(localStorage.getItem(VIC_CACHE_KEY));
+      if(c?.savedAt&&Array.isArray(c.places)&&c.places.every(x=>x&&typeof x.id==="string"&&typeof x.name==="string"&&LAYERS.includes(x.layer)&&validCoordinates(x))){
+        const stale=Date.now()-c.savedAt>=VIC_CACHE_TTL;
+        dataSnapshot={savedAt:c.savedAt,count:c.places.length,mode:stale?"stale":"cache"};
+        mergePlaces(c.places);render();
+        if(!force&&!stale){setStatus(`Using open-map listings updated ${dateLabel(c.savedAt).toLowerCase()}`);return;}
+      }
+    }catch(e){}
     setStatus("Refreshing Victoria’s op-shop and second-hand map…");
     const q='[out:json][timeout:50];area["ISO3166-2"="AU-VIC"]["boundary"="administrative"]->.vic;(nwr["shop"="charity"](area.vic);nwr["shop"="second_hand"](area.vic);nwr["shop"="clothes"]["second_hand"~"^(yes|only)$"](area.vic););out center tags;';
     try{
       const data=await overpass(q);const parsed=(data.elements||[]).map(osmPlace).filter(Boolean);const savedAt=Date.now();
-      localStorage.setItem(VIC_CACHE_KEY,JSON.stringify({savedAt,places:parsed}));dataSnapshot={savedAt,count:parsed.length,mode:"live"};mergePlaces(parsed);render();renderDataStatus();setStatus(`Victoria refreshed · ${parsed.length} mapped second-hand places`);
-    }catch(e){setStatus("Using saved/official shop data; the Victoria refresh is temporarily unavailable.");}
+      writeStorage(VIC_CACHE_KEY,{savedAt,places:parsed});dataSnapshot={savedAt,count:parsed.length,mode:"live"};mergePlaces(parsed);render();renderDataStatus();setStatus(`Victoria refreshed · ${parsed.length} mapped second-hand places`);
+    }catch(e){dataSnapshot.mode=dataSnapshot.savedAt?"stale":"unavailable";renderDataStatus();setStatus("Using saved/curated shop data; the Victoria refresh is temporarily unavailable.");}
   }
 
   async function refreshListings(){
     const btn=$("refreshDataBtn");btn.disabled=true;btn.textContent="Refreshing…";
-    try{await refreshVictoriaBase(true);if(prefs.scope==="near"&&origin)await discoverNear(true);}
+    try{await refreshVictoriaBase(true);if(prefs.scope==="near"&&origin)await discoverNear(true);else await discoverOverview();}
     finally{btn.disabled=false;btn.textContent="↻ Refresh";renderDataStatus();}
   }
 
@@ -347,15 +399,31 @@
 
   async function discoverNear(force=false){
     if(!origin)return;
-    if(!force&&lastNearDiscovery&&haversine(origin.lat,origin.lon,lastNearDiscovery.lat,lastNearDiscovery.lon)<1&&lastNearDiscovery.radius===prefs.radius)return;
+    if(!force&&lastNearDiscovery&&haversine(origin.lat,origin.lon,lastNearDiscovery.lat,lastNearDiscovery.lon)<1&&lastNearDiscovery.radius===prefs.radius&&lastNearDiscovery.layers===prefs.layers.slice().sort().join(","))return;
     const parts=localQueryParts(true);if(!parts.length)return;
     const serial=++requestSerial;const metres=Math.max(3000,Number(prefs.radius||5)*1000+1800);
     setStatus(`Finding ${prefs.layers.map(x=>LAYER_LABEL[x]).join(", ").toLowerCase()} near you…`);
     const body=parts.map(p=>`nwr(around:${metres},${origin.lat},${origin.lon})${p};`).join("");
     try{
       const data=await overpass(`[out:json][timeout:28];(${body});out center tags;`);if(serial!==requestSerial)return;
-      mergePlaces((data.elements||[]).map(osmPlace).filter(Boolean));lastNearDiscovery={lat:origin.lat,lon:origin.lon,radius:prefs.radius};render();applyScopeView();setStatus(`Near me · ${filtered.length} places in this view`);
-    }catch(e){setStatus("Local open-map discovery could not refresh just now; showing saved and official data.");}
+      mergePlaces((data.elements||[]).map(osmPlace).filter(Boolean));cacheLocalPlaces();lastNearDiscovery={lat:origin.lat,lon:origin.lon,radius:prefs.radius,layers:prefs.layers.slice().sort().join(",")};render();applyScopeView();setStatus(`Near me · ${filtered.length} places in this view`);
+    }catch(e){if(serial!==requestSerial)return;setStatus("Local open-map discovery could not refresh just now; showing saved and official data.");}
+  }
+
+  function cacheLocalPlaces(){
+    writeStorage(LOCAL_CACHE_KEY,{savedAt:Date.now(),places:places.filter(p=>p.osm&&!p.manual&&["books","records","cafe"].includes(p.layer)).slice(-2000)});
+  }
+  async function discoverOverview(){
+    const parts=localQueryParts(false).filter(p=>p.includes('"books"')||p.includes('"music"'));
+    if(!parts.length)return;
+    const serial=++requestSerial,b=BBOX[prefs.scope]||BBOX.metro;
+    setStatus("Finding bookshops and record shops in this area…");
+    try{
+      const data=await overpass(`[out:json][timeout:28];(${parts.map(p=>`nwr(${b[1]},${b[0]},${b[3]},${b[2]})${p};`).join("")});out center tags;`);
+      if(serial!==requestSerial)return;
+      mergePlaces(data.elements.map(osmPlace).filter(Boolean));cacheLocalPlaces();render();
+      setStatus("Book and record listings refreshed · use a starting point for nearby cafés.");
+    }catch(e){if(serial===requestSerial)setStatus("Book/record discovery is unavailable; showing cached places. Try a starting point for nearby discovery.");}
   }
 
   async function discoverMapArea(){
@@ -363,11 +431,11 @@
     const b=map.getBounds(),z=map.getZoom();
     const includeCafe=z>=12.2;
     const parts=localQueryParts(includeCafe).filter(x=>!x.includes('shop"="charity')&&!x.includes('second_hand')&&!x.includes('shop"="clothes')||z>=10);
-    if(!parts.length){if(prefs.layers.includes("cafe")&&!includeCafe)toast("Zoom in a little to load cafés");return;}
+    if(!parts.length){mapSearchBounds=[b.getWest(),b.getSouth(),b.getEast(),b.getNorth()];render();setStatus("Showing cached listings in this map area · zoom in to refresh local shops and cafés.");return;}
     const south=b.getSouth(),west=b.getWest(),north=b.getNorth(),east=b.getEast();
     setStatus(includeCafe?"Searching this map area…":"Searching this map area · cafés load when zoomed in…");
     const body=parts.map(p=>`nwr(${south},${west},${north},${east})${p};`).join("");
-    try{const data=await overpass(`[out:json][timeout:25];(${body});out center tags;`);mergePlaces((data.elements||[]).map(osmPlace).filter(Boolean));mapSearchBounds=[west,south,east,north];render();setStatus(`Map area refreshed · ${filtered.length} places in this view`);}catch(e){setStatus("Map-area discovery is temporarily unavailable; the previous results are unchanged.");}
+    try{const data=await overpass(`[out:json][timeout:25];(${body});out center tags;`);mergePlaces((data.elements||[]).map(osmPlace).filter(Boolean));mapSearchBounds=[west,south,east,north];cacheLocalPlaces();render();setStatus(`Map area refreshed · ${filtered.length} places in this view`);}catch(e){setStatus("Map-area discovery is temporarily unavailable; the previous results are unchanged.");}
   }
 
   function setStatus(s){$("scopeStatus").textContent=s;}
@@ -376,7 +444,7 @@
     if(!navigator.geolocation){setStatus("Location is not available in this browser.");return Promise.reject(new Error("no geolocation"));}
     if(!silent)setStatus("Finding your location…");
     return new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(async pos=>{
-      mapSearchBounds=null;origin={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};prefs.scope="near";prefs.locationChoice="use";savePrefs();syncControls();render();await discoverNear(true);applyScopeView();resolve(origin);
+      mapSearchBounds=null;origin={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};prefs.scope="near";prefs.locationChoice="use";savePrefs();syncControls();render();applyScopeView();resolve(origin);discoverNear(true);
     },err=>{setStatus(err.code===1?"Location is off. Search an address or browse Melbourne/Victoria.":"Couldn’t get a reliable location just now.");reject(err);},{enableHighAccuracy:true,timeout:12000,maximumAge:120000}));
   }
 
@@ -385,18 +453,20 @@
     if(!navigator.geolocation){toast("Location is not available");return;}
     followMode=true;$("followBtn").classList.add("active");$("followBtn").textContent="Stop following";
     followWatch=navigator.geolocation.watchPosition(pos=>{
-      const next={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};const moved=origin?haversine(origin.lat,origin.lon,next.lat,next.lon):99;mapSearchBounds=null;origin=next;prefs.scope="near";prefs.locationChoice="use";savePrefs();render();if(moved>1.2)discoverNear(true);if(mapReady)map.easeTo({center:[origin.lon,origin.lat],duration:250});
-    },()=>{toast("Live location paused");},{enableHighAccuracy:true,maximumAge:15000,timeout:15000});
+      const next={lat:pos.coords.latitude,lon:pos.coords.longitude,label:"your location"};const moved=origin?haversine(origin.lat,origin.lon,next.lat,next.lon):99;mapSearchBounds=null;origin=next;prefs.scope="near";prefs.locationChoice="use";savePrefs();syncControls();render();if(moved>1.2)discoverNear(true);if(mapReady)map.easeTo({center:[origin.lon,origin.lat],duration:250});
+    },()=>{navigator.geolocation.clearWatch(followWatch);followWatch=null;followMode=false;$("followBtn").classList.remove("active");$("followBtn").textContent="Follow me";toast("Live location stopped; try Use location or address search");},{enableHighAccuracy:true,maximumAge:15000,timeout:15000});
   }
 
+  let geocodeSerial=0;
   async function geocodeSearch(){
     const q=$("locationSearch").value.trim();if(!q)return;
+    const serial=++geocodeSerial,controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
     setStatus(`Finding ${q}…`);
     try{
-      const res=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=au&limit=1&q=${encodeURIComponent(q+", Victoria, Australia")}`,{headers:{"Accept":"application/json"}});
-      if(!res.ok)throw new Error("geocode");const items=await res.json();if(!items.length){setStatus("I couldn’t find that place in Victoria.");return;}
-      mapSearchBounds=null;origin={lat:Number(items[0].lat),lon:Number(items[0].lon),label:q};prefs.scope="near";savePrefs();syncControls();render();await discoverNear(true);applyScopeView();
-    }catch(e){setStatus("Address search is temporarily unavailable.");}
+      const res=await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=au&limit=1&q=${encodeURIComponent(q+", Victoria, Australia")}`,{headers:{"Accept":"application/json"},signal:controller.signal});
+      if(!res.ok)throw new Error("geocode");const items=await res.json();if(serial!==geocodeSerial)return;if(!items.length||!validCoordinates({lat:Number(items[0].lat),lon:Number(items[0].lon)})){setStatus("I couldn’t find that place in Victoria.");return;}
+      mapSearchBounds=null;origin={lat:Number(items[0].lat),lon:Number(items[0].lon),label:q};prefs.scope="near";prefs.locationChoice="search";prefs.searchOrigin=origin;savePrefs();syncControls();render();await discoverNear(true);applyScopeView();
+    }catch(e){if(serial===geocodeSerial)setStatus("Address search is temporarily unavailable.");}finally{clearTimeout(timer);}
   }
 
   function filteredPlaces(){
@@ -473,12 +543,12 @@
     }
     mapSearchBounds=null;prefs.scope=scope;if(scope==="near")prefs.sort="distance";else if(prefs.sort.startsWith("distance"))prefs.sort="suburb";savePrefs();syncControls();render();applyScopeView();
     if(scope==="near")await discoverNear(false);
-    else if((prefs.layers.includes("books")||prefs.layers.includes("records"))&&scope!=="vic")setStatus("Overview mode · use Search this map to refresh books/records; zoom in for cafés.");
+    else await discoverOverview();
   }
 
   function toggleLayer(layer){
     const set=new Set(prefs.layers);set.has(layer)?set.delete(layer):set.add(layer);if(!set.size)set.add("opshop");prefs.layers=[...set];savePrefs();syncControls();render();
-    if(prefs.scope==="near"&&origin)discoverNear(true);else setStatus(prefs.layers.includes("cafe")?"Overview mode · zoom in and Search this map for cafés.":"Layers updated · Search this map for local book/record data.");
+    if(prefs.scope==="near"&&origin)discoverNear(true);else {setStatus(prefs.layers.includes("cafe")?"Choose a starting point for nearby cafés.":"Layers updated.");discoverOverview();}
   }
 
   function toggleFavourite(id){const p=profile();p.favourites ||= [];const i=p.favourites.indexOf(id);i>=0?p.favourites.splice(i,1):p.favourites.push(id);saveProfiles();render();}
@@ -556,8 +626,8 @@
   function openRoute(){
     const selected=[...routeIds].map(placeById).filter(Boolean),mapped=selected.filter(p=>p.lat!=null);if(mapped.length<2)return;
     const ordered=nearestNeighbour(mapped,origin),unmapped=selected.length-mapped.length,total=routeDistance(ordered);
-    setModal("Your hop",()=>`<div class="detail-hero"><div class="place-type">${ordered.length} STOPS · ABOUT ${total.toFixed(total<10?1:0)} KM BETWEEN STOPS</div><h3>A very good day out.</h3><div>We’ve arranged an efficient approximate order. You remain in charge of serendipity.</div></div><ol class="hop-list">${ordered.map(x=>`<li><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(displayAddress(x).text)}</div></li>`).join("")}</ol>${unmapped?`<div class="data-note">${unmapped} selected ${unmapped===1?"place is":"places are"} not included in routing because map coordinates are unavailable. You can still save the complete hop.</div>`:""}<div class="dialog-actions" style="justify-content:flex-start"><a class="button-link primary" target="_blank" rel="noopener" href="${routeUrl(ordered,"walking")}">Walk this hop</a><a class="button-link" target="_blank" rel="noopener" href="${routeUrl(ordered,"driving")}">Drive this hop</a><a class="button-link" target="_blank" rel="noopener" href="${transitToFirstUrl(ordered[0])}">Transit to first stop</a></div><div class="dialog-actions"><button type="button" id="copyHop">Copy itinerary</button><button type="button" id="saveHop" class="primary">Save this hop</button></div><p class="dialog-copy">Approximate order only; your mapping app handles live travel conditions and street-by-street directions.</p>`);
-    const body=$("modalBody");body.addEventListener("click",async e=>{if(e.target.id==="saveHop"){const name=prompt("Name this hop",[...new Set(selected.map(x=>x.suburb).filter(Boolean))].slice(0,2).join(" + ")||"My op-shop hop");if(!name?.trim())return;const p=profile();p.savedHops||=[];p.savedHops.push({id:`hop-${Date.now()}`,name:name.trim(),placeIds:[...routeIds],createdAt:new Date().toISOString()});saveProfiles();render();e.target.textContent="Saved ✓";e.target.disabled=true;toast("Hop saved");}if(e.target.id==="copyHop"){try{await navigator.clipboard.writeText(hopSummary(ordered));toast("Itinerary copied");}catch(err){toast("Copy is unavailable in this browser");}}});$("modal").showModal();
+    setModal("Your hop",()=>`<div class="detail-hero"><div class="place-type">${ordered.length} STOPS · ABOUT ${total.toFixed(total<10?1:0)} KM IN A STRAIGHT LINE</div><h3>A very good day out.</h3><div>We’ve arranged a suggested order using straight-line distances. You remain in charge of serendipity.</div></div><ol class="hop-list">${ordered.map(x=>`<li><strong>${esc(x.name)}</strong><div class="dialog-copy">${esc(displayAddress(x).text)}</div></li>`).join("")}</ol>${unmapped?`<div class="data-note">${unmapped} selected ${unmapped===1?"place is":"places are"} not included in routing because map coordinates are unavailable. You can still save the complete hop.</div>`:""}<div class="dialog-actions" style="justify-content:flex-start"><a class="button-link primary" target="_blank" rel="noopener" href="${routeUrl(ordered.slice(0,origin?4:5),"walking")}">Walk this hop</a><a class="button-link" target="_blank" rel="noopener" href="${routeUrl(ordered.slice(0,origin?4:5),"driving")}">Drive this hop</a><a class="button-link" target="_blank" rel="noopener" href="${transitToFirstUrl(ordered[0])}">Transit to first stop</a></div>${ordered.length>(origin?4:5)?`<div class="data-note">The map hand-off covers the first ${origin?4:5} stops to respect mobile waypoint limits. Continue with these individual legs:</div>${ordered.slice(1).map((stop,i)=>`<a class="button-link" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&origin=${ordered[i].lat},${ordered[i].lon}&destination=${stop.lat},${stop.lon}&travelmode=walking">${i+1} → ${i+2}: ${esc(stop.name)}</a>`).join(" ")}`:""}<div class="dialog-actions"><button type="button" id="copyHop">Copy itinerary</button><button type="button" id="saveHop" class="primary">Save this hop</button></div><p class="dialog-copy">This is not walking or driving distance; roads, crossings and barriers may lengthen the trip. Your mapping app calculates the actual route.</p>`);
+    const body=$("modalBody");body.addEventListener("click",async e=>{if(e.target.id==="saveHop"){const name=prompt("Name this hop",[...new Set(selected.map(x=>x.suburb).filter(Boolean))].slice(0,2).join(" + ")||"My op-shop hop");if(!name?.trim())return;const p=profile();p.savedHops||=[];p.savedHops.push({id:`hop-${Date.now()}`,name:name.trim(),placeIds:[...routeIds],places:selected.map(x=>clone(x)),createdAt:new Date().toISOString()});saveProfiles();render();e.target.textContent="Saved ✓";e.target.disabled=true;toast("Hop saved");}if(e.target.id==="copyHop"){try{await navigator.clipboard.writeText(hopSummary(ordered));toast("Itinerary copied");}catch(err){toast("Copy is unavailable in this browser");}}});$("modal").showModal();
   }
   function nearestNeighbour(arr,start){const left=[...arr],out=[];let cur=start||left.shift();if(!start)out.push(cur);while(left.length){left.sort((a,b)=>haversine(cur.lat,cur.lon,a.lat,a.lon)-haversine(cur.lat,cur.lon,b.lat,b.lon));cur=left.shift();out.push(cur);}return out;}
 
@@ -598,18 +668,18 @@
 
   function openSettings(){
     const p=profile();const rows=(p.categories||DEFAULT_CATEGORIES).map((c,i)=>`<div class="category-row" data-cat="${i}"><input value="${esc(c.name)}" aria-label="Category name"><select><option value="always" ${c.mode==="always"?"selected":""}>Always</option><option value="adhoc" ${c.mode==="adhoc"?"selected":""}>Ad hoc</option><option value="hidden" ${c.mode==="hidden"?"selected":""}>Hidden</option></select><button type="button" data-delete-cat="${i}">×</button></div>`).join("");
-    setModal("Your review form",()=>`<p class="dialog-copy">Always = shown in every op-shop review. Ad hoc = optional. Hidden = kept out of the way.</p><div class="category-settings" id="categoryRows">${rows}</div><div class="dialog-actions" style="justify-content:flex-start"><button type="button" id="addCategory">＋ Category</button><button type="button" id="resetCategories">Reset defaults</button></div><hr style="border:0;border-top:1px solid var(--line);margin:1rem 0"><h3>Profiles & backup</h3><div class="dialog-copy">Your notes remain on this device unless you export them.</div><div class="dialog-actions" style="justify-content:flex-start"><button type="button" id="exportData">Export JSON</button><label><input type="file" id="importData" accept="application/json" hidden><button type="button" id="importDataBtn">Import JSON</button></label></div><div class="dialog-actions"><button type="button" id="saveSettings" class="primary">Save settings</button></div>`);
+    setModal("Your review form",()=>`<p class="dialog-copy">Always = shown in every op-shop review. Ad hoc = optional. Hidden = kept out of the way.</p><div class="category-settings" id="categoryRows">${rows}</div><div class="dialog-actions" style="justify-content:flex-start"><button type="button" id="addCategory">＋ Category</button><button type="button" id="resetCategories">Reset defaults</button></div><hr style="border:0;border-top:1px solid var(--line);margin:1rem 0"><h3>Profiles & backup</h3><div class="dialog-copy">Your notes remain on this device unless you export them.</div><div class="dialog-actions" style="justify-content:flex-start"><button type="button" id="exportData">Export JSON</button><button type="button" id="exportRecovery">Export pre-import recovery</button><label><input type="file" id="importData" accept="application/json" hidden><button type="button" id="importDataBtn">Import JSON</button></label></div><div class="dialog-actions"><button type="button" id="saveSettings" class="primary">Save settings</button></div>`);
     const body=$("modalBody");let cats=clone(p.categories||DEFAULT_CATEGORIES);
     const redraw=()=>{body.querySelector("#categoryRows").innerHTML=cats.map((c,i)=>`<div class="category-row" data-cat="${i}"><input value="${esc(c.name)}"><select><option value="always" ${c.mode==="always"?"selected":""}>Always</option><option value="adhoc" ${c.mode==="adhoc"?"selected":""}>Ad hoc</option><option value="hidden" ${c.mode==="hidden"?"selected":""}>Hidden</option></select><button type="button" data-delete-cat="${i}">×</button></div>`).join("");};
     body.addEventListener("input",e=>{const row=e.target.closest("[data-cat]");if(!row)return;const i=Number(row.dataset.cat);if(e.target.tagName==="INPUT")cats[i].name=e.target.value;if(e.target.tagName==="SELECT")cats[i].mode=e.target.value;});
     body.addEventListener("change",e=>{const row=e.target.closest("[data-cat]");if(row&&e.target.tagName==="SELECT")cats[Number(row.dataset.cat)].mode=e.target.value;});
-    body.addEventListener("click",e=>{const del=e.target.closest("[data-delete-cat]");if(del){cats.splice(Number(del.dataset.deleteCat),1);redraw();return;}if(e.target.id==="addCategory"){cats.push({id:`custom-${Date.now()}`,name:"New category",mode:"adhoc"});redraw();return;}if(e.target.id==="resetCategories"){cats=clone(DEFAULT_CATEGORIES);redraw();return;}if(e.target.id==="saveSettings"){p.categories=cats.filter(c=>c.name.trim()).map(c=>({...c,name:c.name.trim()}));saveProfiles();$("modal").close();toast("Review form saved");return;}if(e.target.id==="exportData"){exportData();return;}if(e.target.id==="importDataBtn"){body.querySelector("#importData").click();return;}});
+    body.addEventListener("click",e=>{const del=e.target.closest("[data-delete-cat]");if(del){cats.splice(Number(del.dataset.deleteCat),1);redraw();return;}if(e.target.id==="addCategory"){cats.push({id:`custom-${Date.now()}`,name:"New category",mode:"adhoc"});redraw();return;}if(e.target.id==="resetCategories"){cats=clone(DEFAULT_CATEGORIES);redraw();return;}if(e.target.id==="saveSettings"){p.categories=cats.filter(c=>c.name.trim()).map(c=>({...c,name:c.name.trim()}));saveProfiles();$("modal").close();toast("Review form saved");return;}if(e.target.id==="exportData"){exportData();return;}if(e.target.id==="exportRecovery"){try{const old=JSON.parse(localStorage.getItem(PROFILE_KEY+"-before-import"));if(!validProfileState(old))throw new Error();exportData(old);}catch(err){toast("No pre-import recovery backup is available");}return;}if(e.target.id==="importDataBtn"){body.querySelector("#importData").click();return;}});
     body.querySelector("#importData").addEventListener("change",importData);$("modal").showModal();
   }
 
-  function exportData(){const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`op-shop-hop-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);}
-  async function importData(e){const file=e.target.files?.[0];if(!file)return;try{const x=JSON.parse(await file.text());if(!x?.profiles||!x?.activeProfileId)throw new Error("bad");localStorage.setItem(PROFILE_KEY,JSON.stringify(x));location.reload();}catch(err){toast("That backup file does not look valid");}}
-  function newProfile(){const name=prompt("Name this hopper profile");if(!name?.trim())return;const id=crypto.randomUUID?crypto.randomUUID():`p-${Date.now()}`;state.profiles[id]={id,name:name.trim(),categories:clone(DEFAULT_CATEGORIES),reviews:{},favourites:[],manualShops:[],savedHops:[],createdAt:new Date().toISOString()};state.activeProfileId=id;saveProfiles();renderProfileSelect();render();}
+  function exportData(data=state){const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`op-shop-hop-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);}
+  async function importData(e){const file=e.target.files?.[0];if(!file)return;try{const x=JSON.parse(await file.text());if(!validProfileState(x))throw new Error("bad");if(!confirm("Import this backup and replace the profiles on this device? Your current data will be kept as a recovery backup."))return;if(!writeStorage(PROFILE_KEY+"-before-import",state)||!writeStorage(PROFILE_KEY,x))throw new Error("save");location.reload();}catch(err){toast("That backup file does not look valid");}}
+  function newProfile(){const name=prompt("Name this hopper profile");if(!name?.trim())return;const id=crypto.randomUUID?crypto.randomUUID():`p-${Date.now()}`;state.profiles[id]={id,name:name.trim(),categories:clone(DEFAULT_CATEGORIES),reviews:{},favourites:[],manualShops:[],savedHops:[],createdAt:new Date().toISOString()};state.activeProfileId=id;saveProfiles();syncProfilePlaces();routeIds.clear();renderProfileSelect();render();}
   function renderProfileSelect(){$("profileSelect").innerHTML=Object.values(state.profiles).map(p=>`<option value="${esc(p.id)}" ${p.id===state.activeProfileId?"selected":""}>${esc(p.name)}</option>`).join("");}
 
   function setModal(title,bodyFn){
@@ -628,10 +698,10 @@
 
   function wireUI(){
     qa("[data-scope]").forEach(b=>b.addEventListener("click",()=>changeScope(b.dataset.scope)));
-    qa("[data-layer]").forEach(el=>el.addEventListener("click",e=>{e.preventDefault();toggleLayer(el.dataset.layer);}));
+    qa("[data-layer]").forEach(el=>el.querySelector("input").addEventListener("change",()=>toggleLayer(el.dataset.layer)));
     qa("[data-saved]").forEach(b=>b.addEventListener("click",()=>{prefs.saved=b.dataset.saved;savePrefs();syncControls();render();}));
     qa("[data-detail]").forEach(b=>b.addEventListener("click",()=>{prefs.detailFilter=b.dataset.detail;savePrefs();syncControls();render();}));
-    $("allLayersBtn").addEventListener("click",()=>{prefs.layers=prefs.layers.length===LAYERS.length?["opshop"]:[...LAYERS];savePrefs();syncControls();render();if(prefs.scope==="near")discoverNear(true);});
+    $("allLayersBtn").addEventListener("click",()=>{prefs.layers=prefs.layers.length===LAYERS.length?["opshop"]:[...LAYERS];savePrefs();syncControls();render();if(prefs.scope==="near")discoverNear(true);else discoverOverview();});
     $("radiusSelect").addEventListener("change",()=>{prefs.radius=Number($("radiusSelect").value);savePrefs();render();discoverNear(true);applyScopeView();});
     $("sortSelect").addEventListener("change",()=>{prefs.sort=$("sortSelect").value;savePrefs();render();});
     $("placeSearch").addEventListener("input",render);
@@ -642,7 +712,7 @@
     $("searchMapBtn").addEventListener("click",discoverMapArea);
     $("placeList").addEventListener("click",handleListClick);
     $("clearRouteBtn").addEventListener("click",()=>{routeIds.clear();render();});$("planRouteBtn").addEventListener("click",openRoute);
-    $("settingsBtn").addEventListener("click",openSettings);$("newProfileBtn").addEventListener("click",newProfile);$("profileSelect").addEventListener("change",e=>{state.activeProfileId=e.target.value;saveProfiles();routeIds.clear();render();});
+    $("settingsBtn").addEventListener("click",openSettings);$("newProfileBtn").addEventListener("click",newProfile);$("profileSelect").addEventListener("change",e=>{state.activeProfileId=e.target.value;saveProfiles();routeIds.clear();syncProfilePlaces();render();});
     $("addShopBtn").addEventListener("click",openAddShop);
     $("savedHopsBtn").addEventListener("click",openSavedHops);$("dataGuideBtn").addEventListener("click",openDataGuide);$("refreshDataBtn").addEventListener("click",refreshListings);
     $("allowLocationBtn").addEventListener("click",()=>{$("locationPrompt").close();prefs.locationChoice="use";savePrefs();requestLocation().catch(()=>{prefs.scope="metro";savePrefs();syncControls();render();applyScopeView();});});
@@ -652,13 +722,15 @@
   }
 
   async function init(){
-    profile().manualShops?.forEach(s=>{if(!places.some(p=>p.id===s.id))places.push(canonicalSeed({...s,layer:"opshop"}));});
+    try{const c=JSON.parse(localStorage.getItem(LOCAL_CACHE_KEY));if(Array.isArray(c?.places))mergePlaces(c.places.filter(x=>x&&typeof x.id==="string"&&typeof x.name==="string"&&LAYERS.includes(x.layer)&&validCoordinates(x)));}catch(e){}
+    syncProfilePlaces();
     wireUI();renderProfileSelect();syncControls();render();initMap();
     refreshVictoriaBase(false);
     if("serviceWorker" in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
     if(prefs.locationChoice==="use"){
       requestLocation({silent:true}).catch(()=>{if(!origin){prefs.scope="metro";savePrefs();syncControls();render();applyScopeView();}});
-    }else if(!prefs.locationChoice){setTimeout(()=>$("locationPrompt").showModal(),180);}else{setStatus("Browsing Melbourne · location is off.");}
+    }else if(origin){syncControls();render();discoverNear(false);applyScopeView();
+    }else if(!prefs.locationChoice){setTimeout(()=>$("locationPrompt").showModal(),180);}else{if(prefs.scope==="near"){prefs.scope="metro";syncControls();render();}setStatus("Browsing without location.");discoverOverview();}
   }
 
   init();

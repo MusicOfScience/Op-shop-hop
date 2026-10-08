@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {mkdirSync} from "node:fs";
 import {createRequire} from "node:module";
 const require=createRequire(import.meta.url);
 const {chromium}=require("playwright");
@@ -85,6 +86,40 @@ try{
   await page.getByText("Saturday treasure loop",{exact:true}).waitFor();
   await page.getByRole("button",{name:"Load",exact:true}).click();
   assert.equal(await page.locator("#routeCount").innerText(),"2");
+
+  // A separate profile must neither inherit additions nor lose its own additions on switch.
+  page.once("dialog",dialog=>dialog.accept("Second hopper"));
+  await page.locator("#newProfileBtn").click();
+  await page.locator("#placeSearch").fill("E2E Treasure One");
+  assert.equal(await page.locator("article.place-card").count(),0);
+  await addShop("E2E Second Profile","30 Test Street");
+  const ids=await page.locator("#profileSelect option").evaluateAll(options=>options.map(o=>o.value));
+  await page.locator("#profileSelect").selectOption(ids[0]);
+  await page.locator("#placeSearch").fill("E2E Second Profile");
+  assert.equal(await page.locator("article.place-card").count(),0);
+  await page.locator("#placeSearch").fill("E2E Treasure One");
+  assert.equal(await page.locator("article.place-card").count(),1);
+
+  // Reject malformed imports without changing the current profile or reloading.
+  await page.locator("#settingsBtn").click();
+  await page.locator("#importData").setInputFiles({name:"invalid.json",mimeType:"application/json",buffer:Buffer.from(JSON.stringify({profiles:{},activeProfileId:"missing"}))});
+  await page.getByText("That backup file does not look valid",{exact:true}).waitFor();
+  await page.locator("#modalClose").click();
+
+  // Layer controls work with the keyboard, not just a pointer.
+  await page.locator('[data-layer="books"] input').focus();
+  await page.keyboard.press("Space");
+  assert.equal(await page.locator('[data-layer="books"] input').isChecked(),true);
+  await page.keyboard.press("Space");
+  assert.equal(await page.locator('[data-layer="books"] input').isChecked(),false);
+
+  mkdirSync("test-results",{recursive:true});
+  for(const width of [320,390,768,1280]){
+    await page.setViewportSize({width,height:844});
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`No horizontal overflow at ${width}px`);
+    await page.screenshot({path:`test-results/list-${width}.png`,fullPage:true});
+  }
+  await page.setViewportSize({width:390,height:844});
 
   await page.reload({waitUntil:"domcontentloaded"});
   await page.locator("#placeSearch").fill("E2E Treasure One");
