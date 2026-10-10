@@ -20,9 +20,14 @@ await new Promise(resolve=>setTimeout(resolve,30));
 const three=window.fetch(endpoint,{method:'POST',body:'data=records+cafes+vintage'});
 
 const [a,b,c]=await Promise.all([one,two,three]);
-assert.deepEqual(await a.json(),{elements:[]},'First rapid selection should be superseded without another Overpass call');
-assert.deepEqual(await b.json(),{elements:[]},'Intermediate rapid selection should be superseded without another Overpass call');
-assert.equal((await c.json()).elements[0].id,'data=records+cafes+vintage');
+const aData=await a.json(),bData=await b.json(),cData=await c.json();
+// Responses a/b are created inside the vm context, so compare their data rather
+// than object prototypes from two different JavaScript realms.
+assert.equal(Array.isArray(aData.elements),true);
+assert.equal(aData.elements.length,0,'First rapid selection should be superseded without another Overpass call');
+assert.equal(Array.isArray(bData.elements),true);
+assert.equal(bData.elements.length,0,'Intermediate rapid selection should be superseded without another Overpass call');
+assert.equal(cData.elements[0].id,'data=records+cafes+vintage');
 assert.equal(calls.length,1,'Only the settled layer selection should reach Overpass');
 assert.equal(calls[0].body,'data=records+cafes+vintage');
 
