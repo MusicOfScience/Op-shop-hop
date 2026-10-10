@@ -55,7 +55,14 @@ try{
     await page.locator("#manualPostcode").fill("3011");
     await page.locator("#manualWebsite").fill("https://example.com/");
     await page.locator("#saveManualShop").click();
-    await page.getByText(`${name} added and mapped`,{exact:false}).waitFor();
+    // Background listing refreshes may legitimately replace the transient
+    // scope-status message immediately after geocoding. Assert the durable
+    // outcome instead: the saved manual shop has finite mapped coordinates.
+    await page.waitForFunction(shopName=>{
+      const state=JSON.parse(localStorage.getItem("op-shop-hop-v1")||"null");
+      if(!state?.profiles)return false;
+      return Object.values(state.profiles).some(profile=>(profile.manualShops||[]).some(shop=>shop.name===shopName&&Number.isFinite(shop.lat)&&Number.isFinite(shop.lon)));
+    },name);
   };
   await addShop("E2E Treasure One","10 Test Street");
   await addShop("E2E Treasure Two","20 Test Street");

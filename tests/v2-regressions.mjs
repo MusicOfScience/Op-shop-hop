@@ -29,6 +29,6 @@ t.setPlaces([]);const cached=place('stale','Offline treasure','12 Test Street','
 failFetch=false;await t.refreshVictoriaBase(true);assert.match(elements.dataFreshness.textContent,/updated today/);
 // Service-worker updates must not erase another app's offline caches on the shared GitHub Pages origin.
 const handlers={},deleted=[];
-vm.runInNewContext(readFileSync(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(event,fn)=>handlers[event]=fn,clients:{claim:async()=>{}},location:{origin:'https://example.test'}},caches:{keys:async()=>['other-app-cache','op-shop-hop-v2.2.0','op-shop-hop-v2.2.1'],delete:async k=>deleted.push(k)}});
-let activation;handlers.activate({waitUntil:p=>activation=p});await activation;assert.deepEqual(deleted,['op-shop-hop-v2.2.0']);
+vm.runInNewContext(readFileSync(new URL('../sw.js',import.meta.url),'utf8'),{self:{addEventListener:(event,fn)=>handlers[event]=fn,clients:{claim:async()=>{}},location:{origin:'https://example.test'}},caches:{keys:async()=>['other-app-cache','op-shop-hop-v2.2.1','op-shop-hop-v2.2.2'],delete:async k=>deleted.push(k)}});
+let activation;handlers.activate({waitUntil:p=>activation=p});await activation;assert.deepEqual(deleted,['op-shop-hop-v2.2.1']);
 console.log('Regression checks passed: profile isolation, hop recovery, duplicate matching, mutable hours, invalid coordinates/backups, stale cache fallback and cache ownership.');

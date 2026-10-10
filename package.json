@@ -1,10 +1,10 @@
 {
   "name": "op-shop-hop",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/v2-smoke.mjs && node tests/v2-regressions.mjs",
+    "test": "node tests/v2-smoke.mjs && node tests/v2-regressions.mjs && node tests/overpass-guard.mjs",
     "test:e2e": "node tests/v2-e2e.mjs",
     "test:map": "node tests/v2-map.mjs"
   },
