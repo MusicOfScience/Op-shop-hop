@@ -1,5 +1,5 @@
-const CACHE="op-shop-hop-v2.2.1";
-const CORE=["./","./index.html","./styles-v2.css?v=2.2.1","./seed-stores.js?v=2.2.1","./app-v2.js?v=2.2.1","./manifest.webmanifest","./icon.svg"];
+const CACHE="op-shop-hop-v2.2.2";
+const CORE=["./","./index.html","./styles-v2.css?v=2.2.1","./seed-stores.js?v=2.2.1","./overpass-guard.js?v=2.2.2","./app-v2.js?v=2.2.1","./manifest.webmanifest","./icon.svg"];
 
 self.addEventListener("install",event=>{
   event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)).then(()=>self.skipWaiting()));
